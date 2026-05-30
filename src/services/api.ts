@@ -1,4 +1,4 @@
-import type { ApiResponse, CodePatch, EventSummary, Match, RobotProject, Team } from '../types';
+import type { AiAdvice, CodePatch, EventSummary, IntegrationStatus, Match, RobotProject, SponsorSignal, Team, ApiResponse } from '../types';
 
 const delay = (ms = 260) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -206,5 +206,63 @@ export const pathService = {
         generatedBy: 'path_planner',
       },
     });
+  },
+};
+
+export const aiAdvisor = {
+  async ask(task: string, context: string): Promise<ApiResponse<AiAdvice>> {
+    try {
+      const response = await fetch('/api/ai/vex-advice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, context }),
+      });
+      const json = await response.json();
+      if (!response.ok || json?.ok === false) {
+        throw new Error(json?.error?.message ?? `AI request returned ${response.status}`);
+      }
+      return { ok: true, data: json.data as AiAdvice };
+    } catch (error) {
+      return {
+        ok: true,
+        data: {
+          task,
+          summary:
+            'AI providers were unavailable, so RoboLab used a local fallback: verify V5 device configuration, drivetrain geometry, battery level, starting alignment, and one code change at a time.',
+          providers: [{ provider: 'Local fallback', status: 'ok', content: 'Deterministic VEX troubleshooting checklist generated locally.' }],
+        },
+        meta: { error: error instanceof Error ? error.message : 'AI request failed' },
+      };
+    }
+  },
+};
+
+export const integrationsAdapter = {
+  async status(): Promise<ApiResponse<IntegrationStatus[]>> {
+    try {
+      const response = await fetch('/api/integrations/status');
+      const json = await response.json();
+      if (!response.ok || json?.ok === false) throw new Error(json?.error?.message ?? 'Integration status failed');
+      return { ok: true, data: json.data as IntegrationStatus[] };
+    } catch (error) {
+      return {
+        ok: true,
+        data: [],
+        meta: { error: error instanceof Error ? error.message : 'Integration status unavailable' },
+      };
+    }
+  },
+  async sponsorSignals(): Promise<ApiResponse<SponsorSignal[]>> {
+    try {
+      const response = await fetch('/api/signals/sponsors');
+      const json = await response.json();
+      if (!response.ok || json?.ok === false) throw new Error(json?.error?.message ?? 'Sponsor signals failed');
+      return { ok: true, data: json.data as SponsorSignal[] };
+    } catch (error) {
+      return {
+        ok: true,
+        data: [{ source: 'Local fallback', status: 'error', summary: error instanceof Error ? error.message : 'Sponsor signals unavailable' }],
+      };
+    }
   },
 };

@@ -75,3 +75,29 @@ export type CodePatch = {
   reason: string;
   generatedBy: 'path_planner' | 'motor_mapper' | 'troubleshooter';
 };
+
+export type AiProviderResult = {
+  provider: string;
+  model?: string;
+  status: 'ready' | 'missing_key' | 'ok' | 'error';
+  content?: string;
+  error?: string;
+};
+
+export type AiAdvice = {
+  task: string;
+  summary: string;
+  providers: AiProviderResult[];
+};
+
+export type IntegrationStatus = {
+  key: string;
+  configured: boolean;
+  feature: string;
+};
+
+export type SponsorSignal = {
+  source: string;
+  status: 'ok' | 'missing_key' | 'error';
+  summary: string;
+};
