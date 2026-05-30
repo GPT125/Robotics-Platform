@@ -75,8 +75,8 @@ export const vexFields: VexField[] = [
     id: 'override',
     season: '2026-27',
     name: 'Override',
-    objects: 'official 2026-2027 V5RC field, scoring elements, and build resources',
-    sourceUrl: 'https://www.vexrobotics.com/official-path',
+    objects: '12 ft x 12 ft field, 56 cups, 63 pins, 9 goals, 4 toggles, and 4 loaders',
+    sourceUrl: 'https://www.vexrobotics.com/v5/competition',
     cadUrl: 'https://link.vex.com/docs/26-27/v5rc/fieldcad',
   },
   {

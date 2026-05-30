@@ -960,17 +960,77 @@ type FieldPreset = (typeof vexFields)[number];
 
 function FieldObjects({ field }: { field: FieldPreset }) {
   if (field.id === 'override') {
+    const posts = [
+      [350, 350, 'neutral-high'],
+      [220, 220, 'neutral-low'],
+      [480, 220, 'neutral-low'],
+      [220, 480, 'neutral-low'],
+      [480, 480, 'neutral-low'],
+      [150, 150, 'red'],
+      [150, 550, 'red'],
+      [550, 150, 'blue'],
+      [550, 550, 'blue'],
+    ] as const;
+    const pins = [
+      [350, 250, '#ffcc00'], [250, 350, '#ff3b30'], [450, 350, '#007aff'], [350, 450, '#ffcc00'],
+      [125, 260, '#ffcc00'], [575, 260, '#ffcc00'], [125, 440, '#ffcc00'], [575, 440, '#ffcc00'],
+      [250, 125, '#ff3b30'], [450, 575, '#007aff'], [575, 125, '#007aff'], [125, 575, '#ff3b30'],
+    ] as const;
+    const cups = [
+      [250, 250, 0], [450, 250, 90], [250, 450, -90], [450, 450, 180],
+    ] as const;
     return (
       <>
-        <rect x="118" y="96" width="110" height="328" rx="12" fill="rgba(0,122,255,0.14)" stroke="#007aff" strokeWidth="3" />
-        <rect x="472" y="96" width="110" height="328" rx="12" fill="rgba(255,59,48,0.14)" stroke="#ff3b30" strokeWidth="3" />
-        {[140, 210, 280, 350].map((cy) => (
-          <g key={cy}>
-            <rect x="314" y={cy - 18} width="72" height="36" rx="6" fill="#2c2c2e" />
-            <circle cx="350" cy={cy} r="13" fill="#ffcc00" stroke="#1c1c1e" strokeWidth="3" />
+        <path d="M155 155L545 545M545 155L155 545M155 545L350 350L545 545M155 155L350 350L545 155" stroke="#fff" strokeWidth="8" strokeLinecap="round" opacity="0.92" />
+        <path d="M155 155L545 545M545 155L155 545M155 545L350 350L545 545M155 155L350 350L545 155" stroke="rgba(60,60,67,0.32)" strokeWidth="2" strokeLinecap="round" />
+        <rect x="62" y="62" width="84" height="84" fill="none" stroke="#ff3b30" strokeWidth="4" />
+        <rect x="554" y="554" width="84" height="84" fill="none" stroke="#007aff" strokeWidth="4" />
+        <rect x="62" y="554" width="84" height="84" fill="none" stroke="#ff3b30" strokeWidth="4" />
+        <rect x="554" y="62" width="84" height="84" fill="none" stroke="#007aff" strokeWidth="4" />
+        {[
+          [350, 50, 0], [650, 350, 90], [350, 650, 180], [50, 350, 270],
+        ].map(([x, y, rotate]) => (
+          <g key={`${x}-${y}`} transform={`translate(${x} ${y}) rotate(${rotate})`}>
+            <rect x="-45" y="-8" width="90" height="16" rx="8" fill="#ffcc00" stroke="#1c1c1e" strokeWidth="3" />
+            <rect x="-55" y="-15" width="12" height="30" rx="4" fill="#24272b" />
+            <rect x="43" y="-15" width="12" height="30" rx="4" fill="#24272b" />
           </g>
         ))}
-        <path d="M244 74H456M244 446H456" stroke="#1c1c1e" strokeWidth="10" strokeLinecap="round" />
+        {[
+          [350, 50, '#ffcc00'], [650, 350, '#ffcc00'], [350, 650, '#ffcc00'], [50, 350, '#ffcc00'],
+        ].map(([x, y, color]) => (
+          <g key={`switch-${x}-${y}`}>
+            <circle cx={x as number} cy={y as number} r="9" fill={color as string} stroke="#1c1c1e" strokeWidth="2" />
+          </g>
+        ))}
+        {posts.map(([cx, cy, type]) => (
+          <g key={`${cx}-${cy}`}>
+            <ellipse cx={cx} cy={cy + 18} rx={type === 'neutral-high' ? 25 : 19} ry={type === 'neutral-high' ? 15 : 12} fill="#111315" opacity="0.4" />
+            <circle cx={cx} cy={cy} r={type === 'neutral-high' ? 25 : 19} fill={type === 'red' ? '#ff3b30' : type === 'blue' ? '#007aff' : '#0f1115'} stroke="#1c1c1e" strokeWidth="3" />
+            <path d={`M${cx - 14} ${cy - 2}C${cx - 4} ${cy - 14} ${cx + 4} ${cy + 14} ${cx + 14} ${cy + 2}`} fill="none" stroke="#ffcc00" strokeWidth="2" opacity="0.8" />
+            <line x1={cx} y1={cy - (type === 'neutral-high' ? 58 : 42)} x2={cx} y2={cy} stroke="#d7dee6" strokeWidth={type === 'neutral-high' ? 9 : 7} strokeLinecap="round" />
+          </g>
+        ))}
+        {pins.map(([cx, cy, color]) => (
+          <g key={`pin-${cx}-${cy}`}>
+            <path d={`M${cx} ${cy - 22}L${cx - 12} ${cy + 16}H${cx + 12}Z`} fill={color} stroke="#1c1c1e" strokeWidth="2" />
+            <rect x={cx - 9} y={cy + 12} width="18" height="8" rx="2" fill="#d7dee6" stroke="#1c1c1e" strokeWidth="1.5" />
+          </g>
+        ))}
+        {cups.map(([cx, cy, rotate]) => (
+          <g key={`cup-${cx}-${cy}`} transform={`translate(${cx} ${cy}) rotate(${rotate})`}>
+            <path d="M-18 -8H18L12 20H-12Z" fill="#d7dee6" stroke="#1c1c1e" strokeWidth="2" />
+            <path d="M-42 -8H-10L-16 18H-48Z" fill="#ff3b30" stroke="#1c1c1e" strokeWidth="2" />
+            <path d="M10 -8H42L48 18H16Z" fill="#007aff" stroke="#1c1c1e" strokeWidth="2" />
+            <path d="M-14 -38H14L18 -10H-18Z" fill="#ffcc00" stroke="#1c1c1e" strokeWidth="2" />
+          </g>
+        ))}
+        <g transform="translate(20 178)">
+          {Array.from({ length: 9 }, (_, index) => <path key={index} d={`M0 ${index * 14}H54`} stroke={index < 5 ? '#ff3b30' : index < 7 ? '#ffcc00' : '#8e8e93'} strokeWidth="9" strokeLinecap="round" />)}
+        </g>
+        <g transform="translate(680 178)">
+          {Array.from({ length: 9 }, (_, index) => <path key={index} d={`M0 ${index * 14}H-54`} stroke={index < 5 ? '#007aff' : index < 7 ? '#ffcc00' : '#8e8e93'} strokeWidth="9" strokeLinecap="round" />)}
+        </g>
       </>
     );
   }
@@ -1050,22 +1110,49 @@ function FieldObjects({ field }: { field: FieldPreset }) {
 }
 
 function VrcField({ field }: { field: FieldPreset }) {
+  const isOverride = field.id === 'override';
   return (
-    <svg className="absolute inset-0 h-full w-full" viewBox="0 0 700 520" role="img" aria-label={`${field.name} autonomous field`}>
+    <svg className="absolute inset-0 h-full w-full" viewBox={isOverride ? '0 0 700 700' : '0 0 700 520'} role="img" aria-label={`${field.name} autonomous field`}>
       <defs>
-        <pattern id="vrcTiles" width="58.33" height="43.33" patternUnits="userSpaceOnUse">
-          <path d="M58.33 0H0V43.33" fill="none" stroke="rgba(60,60,67,0.18)" strokeWidth="1.4" />
+        <pattern id="vrcTiles" width={isOverride ? '100' : '58.33'} height={isOverride ? '100' : '43.33'} patternUnits="userSpaceOnUse">
+          <path d={isOverride ? 'M100 0H0V100' : 'M58.33 0H0V43.33'} fill="none" stroke="rgba(60,60,67,0.2)" strokeWidth="1.4" />
+        </pattern>
+        <pattern id="vrcWallCheck" width="18" height="10" patternUnits="userSpaceOnUse">
+          <rect width="9" height="10" fill="#1c1c1e" />
+          <rect x="9" width="9" height="10" fill="#f2f2f7" />
         </pattern>
       </defs>
-      <rect x="28" y="28" width="644" height="464" rx="14" fill="#f8f8fb" stroke="#1c1c1e" strokeWidth="10" />
-      <rect x="38" y="38" width="624" height="444" fill="url(#vrcTiles)" />
-      <rect x="38" y="38" width="160" height="132" fill="rgba(0,122,255,0.12)" />
-      <rect x="502" y="350" width="160" height="132" fill="rgba(255,59,48,0.13)" />
-      <line x1="350" y1="38" x2="350" y2="482" stroke="rgba(60,60,67,0.32)" strokeWidth="3" strokeDasharray="10 9" />
-      <line x1="38" y1="260" x2="662" y2="260" stroke="rgba(60,60,67,0.22)" strokeWidth="2" />
+      {isOverride ? (
+        <>
+          <rect x="24" y="24" width="652" height="652" rx="16" fill="#f8f8fb" stroke="#f2f2f7" strokeWidth="14" />
+          <rect x="50" y="50" width="600" height="600" fill="#85888d" />
+          <rect x="50" y="50" width="600" height="600" fill="url(#vrcTiles)" opacity="0.68" />
+          <path d="M50 50H650V650H50Z" fill="none" stroke="#d7dee6" strokeWidth="18" />
+          <path d="M50 50H650V650H50Z" fill="none" stroke="#1c1c1e" strokeWidth="8" />
+          <rect x="72" y="46" width="180" height="10" fill="url(#vrcWallCheck)" />
+          <rect x="448" y="46" width="180" height="10" fill="url(#vrcWallCheck)" />
+          <rect x="72" y="644" width="180" height="10" fill="url(#vrcWallCheck)" />
+          <rect x="448" y="644" width="180" height="10" fill="url(#vrcWallCheck)" />
+          <text x="62" y="83" className="vex-field-label">12 ft x 12 ft V5RC field</text>
+          <text x="62" y="107" className="vex-field-label subtle">6 x 6 tiles · 600 mm each</text>
+        </>
+      ) : (
+        <>
+          <rect x="28" y="28" width="644" height="464" rx="14" fill="#f8f8fb" stroke="#1c1c1e" strokeWidth="10" />
+          <rect x="38" y="38" width="624" height="444" fill="url(#vrcTiles)" />
+          <rect x="38" y="38" width="160" height="132" fill="rgba(0,122,255,0.12)" />
+          <rect x="502" y="350" width="160" height="132" fill="rgba(255,59,48,0.13)" />
+          <line x1="350" y1="38" x2="350" y2="482" stroke="rgba(60,60,67,0.32)" strokeWidth="3" strokeDasharray="10 9" />
+          <line x1="38" y1="260" x2="662" y2="260" stroke="rgba(60,60,67,0.22)" strokeWidth="2" />
+        </>
+      )}
       <FieldObjects field={field} />
-      <text x="54" y="68" className="vex-field-label">BLUE START</text>
-      <text x="506" y="462" className="vex-field-label">RED ZONE</text>
+      {!isOverride ? (
+        <>
+          <text x="54" y="68" className="vex-field-label">BLUE START</text>
+          <text x="506" y="462" className="vex-field-label">RED ZONE</text>
+        </>
+      ) : null}
     </svg>
   );
 }
@@ -1086,7 +1173,8 @@ export function PathPlanner() {
   }
   function addPathPoint(event: React.MouseEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
-    setPathPoints((current) => [...current, { x: Math.round(((event.clientX - rect.left) / rect.width) * 700), y: Math.round(((event.clientY - rect.top) / rect.height) * 520) }]);
+    const fieldHeight = field.id === 'override' ? 700 : 520;
+    setPathPoints((current) => [...current, { x: Math.round(((event.clientX - rect.left) / rect.width) * 700), y: Math.round(((event.clientY - rect.top) / rect.height) * fieldHeight) }]);
     setAccepted(false);
     setPlannerStatus('Path point added. Optimize when the route is complete.');
   }
@@ -1106,9 +1194,16 @@ export function PathPlanner() {
       </SectionHeader>
       <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
         <section className="panel p-4">
-          <div className="vrc-field relative h-[620px] overflow-hidden rounded-lg border border-line bg-[#f8f8fb]" onClick={addPathPoint}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold">{field.name}</p>
+              <p className="text-xs text-slate-500">{field.season} · {field.objects}</p>
+            </div>
+            <p className="text-xs text-slate-500">{plannerStatus}</p>
+          </div>
+          <div className={`vrc-field relative mx-auto w-full overflow-hidden rounded-lg border border-line bg-[#f8f8fb] ${field.id === 'override' ? 'aspect-square max-w-[650px]' : 'h-[620px]'}`} onClick={addPathPoint}>
             <VrcField field={field} />
-            <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 700 520">
+            <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox={field.id === 'override' ? '0 0 700 700' : '0 0 700 520'}>
               {pathPoints.length > 1 ? <polyline points={pathPoints.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#ff3b30" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" /> : null}
               {pathPoints.map((point, index) => (
                 <g key={`${point.x}-${point.y}-${index}`}>
@@ -1117,11 +1212,6 @@ export function PathPlanner() {
                 </g>
               ))}
             </svg>
-            <div className="absolute right-4 top-4 rounded-lg border border-line bg-white/90 px-3 py-2 text-sm shadow-sm">
-              <p className="font-semibold">{field.name}</p>
-              <p className="text-xs text-slate-500">{field.season} · {field.objects}</p>
-              <p className="mt-1 text-xs text-slate-500">{plannerStatus}</p>
-            </div>
             <div className="absolute bottom-4 left-4 flex gap-2">
               <button onClick={(event) => { event.stopPropagation(); void optimize(); }} className="h-11 rounded-lg bg-primary px-4 text-sm font-medium">Optimize</button>
               <button onClick={(event) => { event.stopPropagation(); setPathPoints((current) => current.slice(0, -1)); }} className="h-11 rounded-lg border border-line bg-ink/80 px-4 text-sm">Undo</button>
