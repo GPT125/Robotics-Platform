@@ -1,4 +1,4 @@
-import { Gauge, Globe2, Search, Settings, Star } from 'lucide-react';
+import { Bot, Compass, Gauge, Globe2, Search, Settings, Star } from 'lucide-react';
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
   AllianceBuilder,
@@ -18,8 +18,10 @@ import {
 const tabs = [
   { to: '/app', label: 'Favorites', icon: Star },
   { to: '/app/scout', label: 'World Skills', icon: Globe2 },
-  { to: '/app/compare', label: 'TrueSkill', icon: Gauge },
   { to: '/app/alliance', label: 'Lookup', icon: Search },
+  { to: '/app/robots', label: 'Robots', icon: Bot },
+  { to: '/app/path', label: 'Planner', icon: Compass },
+  { to: '/app/compare', label: 'TrueSkill', icon: Gauge },
   { to: '/app/settings', label: 'Settings', icon: Settings },
 ];
 

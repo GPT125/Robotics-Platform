@@ -7,7 +7,10 @@ import {
   CheckCircle2,
   Code2,
   Compass,
+  Cpu,
   Database,
+  FileCode2,
+  FolderOpen,
   Gauge,
   GitCompare,
   Info,
@@ -23,7 +26,7 @@ import {
   Upload,
   WifiOff,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart as ReLineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { MetricCard } from './components/MetricCard';
@@ -632,15 +635,76 @@ export function AllianceBuilder() {
 export function RobotWorkspace({ simMode = false }: { simMode?: boolean }) {
   const { data } = useQuery({ queryKey: ['robots'], queryFn: robotService.listProjects });
   const robots = data?.ok ? data.data : robotProjects;
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ name: string; path: string; size: number; type: string; content?: string }>>([]);
+  const codeFiles = uploadedFiles.filter((file) => /\.(cpp|h|hpp|py|txt|json|v5code)$/i.test(file.name));
+  const codePreview = codeFiles.find((file) => file.content)?.content ?? sampleCode;
+  const detectedDevices = useMemo(() => {
+    const names = codeFiles.map((file) => `${file.name} ${file.content ?? ''}`.toLowerCase()).join(' ');
+    return [
+      ['Drivetrain', names.includes('drive') || names.includes('main') ? 'Detected' : 'Ready to map', Bot],
+      ['V5 Brain', codeFiles.length ? 'Project loaded' : 'Waiting for code', Cpu],
+      ['Motors', names.includes('motor') || names.includes('robot-config') ? 'Ports found' : 'Manual review', Gauge],
+      ['Autonomous', names.includes('auton') || names.includes('main') ? 'Previewable' : 'No route yet', Compass],
+    ] as const;
+  }, [codeFiles]);
+
+  async function handleProjectFiles(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = await Promise.all(Array.from(event.target.files ?? []).map(async (file) => {
+      const isCode = /\.(cpp|h|hpp|py|txt|json|v5code)$/i.test(file.name);
+      return {
+        name: file.name,
+        path: file.webkitRelativePath || file.name,
+        size: file.size,
+        type: file.type || 'code',
+        content: isCode ? await file.text() : undefined,
+      };
+    }));
+    setUploadedFiles(files);
+  }
+
   return (
     <>
       <SectionHeader eyebrow="Robot projects" title={simMode ? 'Simulator' : 'Robot workspace'}>
-        <SecondaryButton>
-          <Upload size={18} /> Upload code
-        </SecondaryButton>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => folderInputRef.current?.click()} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white/5 px-4 text-sm text-slate-200 hover:border-electric/50">
+            <FolderOpen size={18} /> Upload folder
+          </button>
+          <button onClick={() => fileInputRef.current?.click()} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white/5 px-4 text-sm text-slate-200 hover:border-electric/50">
+            <Upload size={18} /> Upload files
+          </button>
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleProjectFiles}
+            {...{ webkitdirectory: '', directory: '' }}
+          />
+          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleProjectFiles} />
+        </div>
       </SectionHeader>
       <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
         <section className="space-y-3">
+          <article className="panel p-4">
+            <p className="font-semibold text-white">VEXcode import</p>
+            <p className="mt-1 text-sm leading-5 text-slate-400">Upload an entire project folder or selected source files. RoboLab keeps the import local in the browser while it builds the robot preview and simulation map.</p>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+              <span className="rounded-lg border border-line bg-white/5 p-2">{uploadedFiles.length} files</span>
+              <span className="rounded-lg border border-line bg-white/5 p-2">{codeFiles.length} code files</span>
+            </div>
+            {codeFiles.length ? (
+              <div className="mt-3 max-h-48 overflow-auto rounded-lg border border-line bg-white/5">
+                {codeFiles.slice(0, 12).map((file) => (
+                  <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-xs last:border-b-0" key={file.path}>
+                    <FileCode2 size={14} className="shrink-0 text-electric" />
+                    <span className="min-w-0 truncate">{file.path}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </article>
           {robots.map((robot) => (
             <article className="panel p-4" key={robot.id}>
               <p className="font-semibold text-white">{robot.name}</p>
@@ -658,8 +722,17 @@ export function RobotWorkspace({ simMode = false }: { simMode?: boolean }) {
           <RobotScene />
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="panel p-4">
-              <h2 className="font-semibold">Code mapping</h2>
-              <pre className="mt-4 max-h-72 overflow-auto rounded-lg border border-line bg-ink p-4 text-xs leading-5 text-slate-300">{sampleCode}</pre>
+              <h2 className="font-semibold">VEX hardware map</h2>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {detectedDevices.map(([name, status, Icon]) => (
+                  <div className="rounded-lg border border-line bg-white/5 p-3" key={name}>
+                    <Icon className="text-electric" size={18} />
+                    <p className="mt-2 text-sm font-semibold">{name}</p>
+                    <p className="text-xs text-slate-500">{status}</p>
+                  </div>
+                ))}
+              </div>
+              <pre className="mt-4 max-h-72 overflow-auto rounded-lg border border-line bg-ink p-4 text-xs leading-5 text-slate-300">{codePreview}</pre>
             </div>
             <div className="panel p-4">
               <h2 className="font-semibold">Simulation timeline</h2>
@@ -679,9 +752,111 @@ export function RobotWorkspace({ simMode = false }: { simMode?: boolean }) {
   );
 }
 
+const fieldPresets = [
+  { id: 'high-stakes', season: '2024-25', name: 'High Stakes', objects: 'rings, mobile goals, wall stakes', primary: '#ff3b30', secondary: '#007aff' },
+  { id: 'over-under', season: '2023-24', name: 'Over Under', objects: 'triballs and match-load zones', primary: '#ff9500', secondary: '#34c759' },
+  { id: 'spin-up', season: '2022-23', name: 'Spin Up', objects: 'discs, rollers, and expansion zones', primary: '#ffcc00', secondary: '#007aff' },
+  { id: 'tipping-point', season: '2021-22', name: 'Tipping Point', objects: 'rings, platforms, and mobile goals', primary: '#af52de', secondary: '#ff3b30' },
+] as const;
+
+type FieldPreset = (typeof fieldPresets)[number];
+
+function FieldObjects({ field }: { field: FieldPreset }) {
+  if (field.id === 'over-under') {
+    return (
+      <>
+        {[
+          [150, 128], [240, 255], [355, 168], [475, 298], [560, 118], [610, 390],
+        ].map(([cx, cy]) => (
+          <polygon key={`${cx}-${cy}`} points={`${cx},${cy - 18} ${cx + 22},${cy + 16} ${cx - 22},${cy + 16}`} fill="#ff9500" stroke="#1c1c1e" strokeWidth="3" />
+        ))}
+        <rect x="302" y="34" width="96" height="452" rx="8" fill="rgba(52,199,89,0.16)" stroke="#34c759" strokeWidth="3" strokeDasharray="8 8" />
+      </>
+    );
+  }
+
+  if (field.id === 'spin-up') {
+    return (
+      <>
+        {[
+          [150, 160], [230, 330], [350, 250], [470, 150], [550, 360],
+        ].map(([cx, cy]) => (
+          <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="20" fill="#ffcc00" stroke="#1c1c1e" strokeWidth="4" />
+        ))}
+        <rect x="48" y="42" width="36" height="98" rx="8" fill="#007aff" />
+        <rect x="616" y="380" width="36" height="98" rx="8" fill="#ff3b30" />
+      </>
+    );
+  }
+
+  if (field.id === 'tipping-point') {
+    return (
+      <>
+        {[
+          [166, 145, '#007aff'], [350, 256, '#ff3b30'], [534, 370, '#007aff'],
+        ].map(([cx, cy, color]) => (
+          <g key={`${cx}-${cy}`}>
+            <circle cx={cx as number} cy={cy as number} r="34" fill={color as string} opacity="0.9" />
+            <circle cx={cx as number} cy={cy as number} r="16" fill="#f2f2f7" />
+          </g>
+        ))}
+        <rect x="96" y="390" width="160" height="70" rx="10" fill="rgba(0,122,255,0.22)" stroke="#007aff" strokeWidth="3" />
+        <rect x="444" y="60" width="160" height="70" rx="10" fill="rgba(255,59,48,0.22)" stroke="#ff3b30" strokeWidth="3" />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {[
+        [144, 134, '#007aff'], [214, 316, '#ff3b30'], [350, 250, '#1c1c1e'], [486, 184, '#ff3b30'], [558, 366, '#007aff'],
+      ].map(([cx, cy, color]) => (
+        <g key={`${cx}-${cy}`}>
+          <circle cx={cx as number} cy={cy as number} r="24" fill="none" stroke={color as string} strokeWidth="8" />
+          <line x1={(cx as number) - 14} y1={cy as number} x2={(cx as number) + 14} y2={cy as number} stroke={color as string} strokeWidth="4" />
+        </g>
+      ))}
+      <rect x="318" y="46" width="64" height="160" rx="8" fill="rgba(28,28,30,0.78)" />
+      <rect x="318" y="314" width="64" height="160" rx="8" fill="rgba(28,28,30,0.78)" />
+    </>
+  );
+}
+
+function VrcField({ field }: { field: FieldPreset }) {
+  return (
+    <svg className="absolute inset-0 h-full w-full" viewBox="0 0 700 520" role="img" aria-label={`${field.name} autonomous field`}>
+      <defs>
+        <pattern id="vrcTiles" width="58.33" height="43.33" patternUnits="userSpaceOnUse">
+          <path d="M58.33 0H0V43.33" fill="none" stroke="rgba(60,60,67,0.18)" strokeWidth="1.4" />
+        </pattern>
+      </defs>
+      <rect x="28" y="28" width="644" height="464" rx="14" fill="#f8f8fb" stroke="#1c1c1e" strokeWidth="10" />
+      <rect x="38" y="38" width="624" height="444" fill="url(#vrcTiles)" />
+      <rect x="38" y="38" width="160" height="132" fill="rgba(0,122,255,0.12)" />
+      <rect x="502" y="350" width="160" height="132" fill="rgba(255,59,48,0.13)" />
+      <line x1="350" y1="38" x2="350" y2="482" stroke="rgba(60,60,67,0.32)" strokeWidth="3" strokeDasharray="10 9" />
+      <line x1="38" y1="260" x2="662" y2="260" stroke="rgba(60,60,67,0.22)" strokeWidth="2" />
+      <FieldObjects field={field} />
+      <path d="M98 412 C 168 330, 250 304, 328 260 S 496 172, 600 108" fill="none" stroke="#ff3b30" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M98 412 C 168 330, 250 304, 328 260 S 496 172, 600 108" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeDasharray="9 12" />
+      <g transform="translate(76 385) rotate(-18)">
+        <rect x="0" y="0" width="64" height="48" rx="7" fill="#2c2c2e" stroke="#ff3b30" strokeWidth="4" />
+        <rect x="8" y="8" width="48" height="14" rx="3" fill="#0a84ff" />
+        <circle cx="12" cy="52" r="8" fill="#1c1c1e" />
+        <circle cx="52" cy="52" r="8" fill="#1c1c1e" />
+      </g>
+      <circle cx="600" cy="108" r="14" fill="#34c759" stroke="#1c1c1e" strokeWidth="3" />
+      <text x="54" y="68" className="vex-field-label">BLUE START</text>
+      <text x="506" y="462" className="vex-field-label">RED ZONE</text>
+    </svg>
+  );
+}
+
 export function PathPlanner() {
   const [accepted, setAccepted] = useState(false);
   const [patch, setPatch] = useState('');
+  const [fieldId, setFieldId] = useState<FieldPreset['id']>('high-stakes');
+  const field = fieldPresets.find((preset) => preset.id === fieldId) ?? fieldPresets[0];
   async function optimize() {
     const response = await pathService.optimizePath([]);
     if (response.ok) setPatch(response.data.patch.newText);
@@ -689,18 +864,25 @@ export function PathPlanner() {
   return (
     <>
       <SectionHeader eyebrow="Autonomous" title="Field path planner">
-        <PrimaryButton>
-          <Compass size={18} /> Draw path
-        </PrimaryButton>
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="h-11 rounded-lg border border-line bg-ink px-3 text-sm" value={fieldId} onChange={(event) => setFieldId(event.target.value as FieldPreset['id'])}>
+            {fieldPresets.map((preset) => (
+              <option value={preset.id} key={preset.id}>{preset.season} · {preset.name}</option>
+            ))}
+          </select>
+          <PrimaryButton>
+            <Compass size={18} /> Draw path
+          </PrimaryButton>
+        </div>
       </SectionHeader>
       <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
         <section className="panel p-4">
-          <div className="field-grid relative h-[520px] overflow-hidden rounded-lg border border-line bg-[#07101f]">
-            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 700 520">
-              <path d="M80 420 C 170 310, 260 290, 350 240 S 510 160, 610 90" fill="none" stroke="#22D3EE" strokeWidth="7" strokeLinecap="round" />
-              <circle cx="80" cy="420" r="12" fill="#3B82F6" />
-              <circle cx="610" cy="90" r="12" fill="#FF7A18" />
-            </svg>
+          <div className="vrc-field relative h-[620px] overflow-hidden rounded-lg border border-line bg-[#f8f8fb]">
+            <VrcField field={field} />
+            <div className="absolute right-4 top-4 rounded-lg border border-line bg-white/90 px-3 py-2 text-sm shadow-sm">
+              <p className="font-semibold">{field.name}</p>
+              <p className="text-xs text-slate-500">{field.season} · {field.objects}</p>
+            </div>
             <div className="absolute bottom-4 left-4 flex gap-2">
               <button onClick={optimize} className="h-11 rounded-lg bg-primary px-4 text-sm font-medium">Optimize</button>
               <button className="h-11 rounded-lg border border-line bg-ink/80 px-4 text-sm">Undo</button>
