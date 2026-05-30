@@ -24,14 +24,14 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart as ReLineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { MetricCard } from './components/MetricCard';
 import { RobotScene } from './components/RobotScene';
 import { SectionHeader } from './components/SectionHeader';
 import { SyncPill } from './components/StatusPill';
 import { currentEvent, matches, notes, robotProjects, sampleCode, teams } from './data/mockData';
-import { pathService, robotService } from './services/api';
+import { pathService, robotEventsAdapter, robotService } from './services/api';
 import type { LucideIcon } from 'lucide-react';
 import type { Team } from './types';
 
@@ -62,6 +62,16 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
         <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">{detail}</p>
       </div>
     </div>
+  );
+}
+
+function LiveStatus({ status, detail }: { status: unknown; detail?: unknown }) {
+  const label = typeof status === 'string' ? status : 'Demo';
+  const tone = label === 'Fresh' ? 'text-good border-good/40 bg-good/10' : label === 'Offline' ? 'text-bad border-bad/40 bg-bad/10' : 'text-electric border-electric/40 bg-electric/10';
+  return (
+    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${tone}`}>
+      {label}{detail ? ` · ${String(detail)}` : ''}
+    </span>
   );
 }
 
@@ -190,17 +200,28 @@ export function Pricing() {
 }
 
 export function Dashboard() {
+  const eventsQuery = useQuery({
+    queryKey: ['robotevents', 'events', 'dashboard'],
+    queryFn: () => robotEventsAdapter.searchEvents(),
+    refetchInterval: 60_000,
+  });
+  const liveEvent = eventsQuery.data?.ok ? eventsQuery.data.data[0] ?? currentEvent : currentEvent;
+  const liveStatus = eventsQuery.data?.ok ? eventsQuery.data.meta?.liveStatus : 'Loading';
+
   return (
     <>
       <SectionHeader eyebrow="Workspace 8059A" title="Competition dashboard">
-        <PrimaryButton>
-          <Plus size={18} /> Scout match
-        </PrimaryButton>
+        <div className="flex flex-wrap items-center gap-2">
+          <LiveStatus status={liveStatus} detail={eventsQuery.data?.ok ? eventsQuery.data.meta?.source : undefined} />
+          <PrimaryButton>
+            <Plus size={18} /> Scout match
+          </PrimaryButton>
+        </div>
       </SectionHeader>
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         <div className="space-y-4">
           <div className="data-grid">
-            <MetricCard label="Current event" value={currentEvent.name} detail={`${currentEvent.teamCount} teams in ${currentEvent.division}`} icon={Trophy} tone="orange" />
+            <MetricCard label="Current event" value={liveEvent.name} detail={`${liveEvent.teamCount} teams in ${liveEvent.division}`} icon={Trophy} tone="orange" />
             <MetricCard label="Next match" value="Q24 in 12m" detail="8059A + 24K vs 315R + 1010X" icon={Activity} tone="cyan" />
             <MetricCard label="Team rank" value="#6" detail="Trend up 3 places since lunch" icon={LineChart} tone="green" />
             <MetricCard label="Robot status" value="High calibration" detail="Drive and turn physical tests entered" icon={Gauge} tone="blue" />
@@ -219,7 +240,7 @@ export function Dashboard() {
           <h2 className="font-semibold text-white">Insight rail</h2>
           <div className="mt-4 space-y-3">
             {[
-              ['Teams to watch', '315R has the strongest programming skills but scout notes flag intake reliability.'],
+              ['Live data', eventsQuery.data?.ok && eventsQuery.data.meta?.error ? String(eventsQuery.data.meta.error) : 'RobotEvents refreshes every 60 seconds through the server-side token proxy.'],
               ['Unsynced notes', '3 notes are saved locally and will retry when the network recovers.'],
               ['Simulation warning', 'Skills Bot needs a 24 in drive test before routes can be marked Verified.'],
             ].map(([title, detail]) => (
@@ -287,12 +308,31 @@ export function ScoutWorkspace() {
 }
 
 export function EventCenter() {
+  const { id } = useParams();
+  const eventId = id && /^\d+$/.test(id) ? id : undefined;
+  const eventQuery = useQuery({
+    queryKey: ['robotevents', 'events', 'center'],
+    queryFn: () => robotEventsAdapter.searchEvents(),
+    refetchInterval: 120_000,
+  });
+  const selectedEvent = eventQuery.data?.ok ? eventQuery.data.data.find((event) => event.id === eventId) ?? eventQuery.data.data[0] ?? currentEvent : currentEvent;
+  const matchesQuery = useQuery({
+    queryKey: ['robotevents', 'matches', selectedEvent.id],
+    queryFn: () => robotEventsAdapter.getEventMatches(selectedEvent.id),
+    refetchInterval: 30_000,
+  });
+  const eventMatches = matchesQuery.data?.ok ? matchesQuery.data.data : matches;
+  const liveStatus = matchesQuery.data?.ok ? matchesQuery.data.meta?.liveStatus : 'Loading';
+
   return (
     <>
-      <SectionHeader eyebrow={currentEvent.status} title={currentEvent.name}>
-        <SecondaryButton>
-          <Database size={18} /> Refresh cached data
-        </SecondaryButton>
+      <SectionHeader eyebrow={selectedEvent.location} title={selectedEvent.name}>
+        <div className="flex flex-wrap items-center gap-2">
+          <LiveStatus status={liveStatus} detail={matchesQuery.data?.ok ? matchesQuery.data.meta?.source : undefined} />
+          <SecondaryButton>
+            <Database size={18} /> Live refresh
+          </SecondaryButton>
+        </div>
       </SectionHeader>
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         <section className="panel overflow-hidden">
@@ -300,7 +340,7 @@ export function EventCenter() {
             <h2 className="font-semibold">Live match center</h2>
           </div>
           <div className="divide-y divide-line">
-            {matches.map((match) => (
+            {eventMatches.map((match) => (
               <article className="grid gap-4 p-4 md:grid-cols-[120px_1fr_1fr_180px]" key={match.id}>
                 <div>
                   <p className="text-lg font-semibold">{match.number}</p>
@@ -323,11 +363,14 @@ export function EventCenter() {
           </div>
         </section>
         <aside className="panel p-5">
-          <h2 className="font-semibold">Event tabs</h2>
-          <div className="mt-4 grid gap-2">
-            {['Overview', 'Schedule', 'Rankings', 'Skills', 'Scout', 'Predictions', 'Alliance'].map((tab) => (
-              <button className="rounded-lg border border-line bg-white/5 px-3 py-3 text-left text-sm text-slate-300" key={tab}>{tab}</button>
-            ))}
+          <h2 className="font-semibold">Live event status</h2>
+          <p className="mt-3 text-sm leading-6 text-slate-400">
+            Schedule and matches refresh every 30 seconds when RobotEvents returns JSON. If the API redirects or rate-limits,
+            RoboLab keeps the cached/demo view and marks the feed stale instead of overlapping or breaking the page.
+          </p>
+          <div className="mt-4 rounded-lg border border-line bg-white/5 p-3 text-sm">
+            <p className="font-medium">Event ID</p>
+            <p className="mt-1 text-slate-400">{selectedEvent.id}</p>
           </div>
         </aside>
       </div>
@@ -437,36 +480,149 @@ export function CompareTeams() {
 }
 
 export function AllianceBuilder() {
+  const [teamQuery, setTeamQuery] = useState('');
   const ranked = useMemo(() => [...teams].sort((a, b) => score(b) - score(a)), []);
+  const eventsQuery = useQuery({
+    queryKey: ['robotevents', 'lookup-events'],
+    queryFn: () => robotEventsAdapter.searchEvents(),
+    refetchInterval: 120_000,
+  });
+  const teamsQuery = useQuery({
+    queryKey: ['robotevents', 'lookup-teams', teamQuery],
+    queryFn: () => robotEventsAdapter.searchTeams(teamQuery),
+    enabled: teamQuery.trim().length > 1,
+    staleTime: 60_000,
+  });
+  const lookupTeams = teamsQuery.data?.ok && teamsQuery.data.data.length ? teamsQuery.data.data : ranked;
+  const liveEvents = eventsQuery.data?.ok ? eventsQuery.data.data : [currentEvent];
+
   return (
     <>
-      <SectionHeader eyebrow="Partner optimizer" title="Alliance builder">
-        <PrimaryButton>
-          <Trophy size={18} /> Selection mode
-        </PrimaryButton>
+      <SectionHeader eyebrow="Teams, events, compare, alliance" title="Lookup">
+        <div className="flex flex-wrap items-center gap-2">
+          <LiveStatus status={eventsQuery.data?.ok ? eventsQuery.data.meta?.liveStatus : 'Loading'} detail="events" />
+          <PrimaryButton>
+            <Trophy size={18} /> Selection mode
+          </PrimaryButton>
+        </div>
       </SectionHeader>
-      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        <section className="grid gap-3">
-          {ranked.map((team, index) => (
-            <article className="panel p-4" key={team.number}>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-lg font-semibold">#{index + 1} {team.number} · {team.name}</p>
-                  <p className="text-sm text-slate-400">Recommended because: {team.tags.slice(0, 2).join(', ')}</p>
-                </div>
-                <p className="text-2xl font-semibold text-electric">{score(team)}</p>
-              </div>
-            </article>
-          ))}
-        </section>
-        <aside className="panel p-5">
-          <h2 className="font-semibold">Pick list tiers</h2>
-          {['A', 'B', 'C', 'D'].map((tier) => (
-            <div className="mt-3 rounded-lg border border-line bg-ink/45 p-3" key={tier}>
-              <p className="text-sm font-medium">Tier {tier}</p>
-              <p className="text-xs text-slate-500">Drag teams here during alliance selection.</p>
+      <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+        <section className="space-y-4">
+          <div className="panel p-4">
+            <label className="text-sm font-medium text-slate-400" htmlFor="team-search">Team lookup</label>
+            <div className="lookup-search mt-2 flex gap-2">
+              <input
+                id="team-search"
+                className="h-11 min-w-0 flex-1 rounded-lg border border-line px-3 text-sm"
+                value={teamQuery}
+                onChange={(event) => setTeamQuery(event.target.value)}
+                placeholder="Search a team number, e.g. 8059A"
+              />
+              <SecondaryButton>
+                <Search size={18} /> Search
+              </SecondaryButton>
             </div>
-          ))}
+            {teamsQuery.data?.ok && teamsQuery.data.meta?.error ? <p className="mt-2 text-sm text-bad">{String(teamsQuery.data.meta.error)}</p> : null}
+          </div>
+
+          <div className="panel p-4">
+            <h2 className="font-semibold">Compare and partner ranking</h2>
+            <table className="desktop-table mt-3 w-full min-w-[720px] text-left text-sm">
+              <thead className="text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="p-3">Team</th>
+                  <th className="p-3">Avg</th>
+                  <th className="p-3">Win</th>
+                  <th className="p-3">Consistency</th>
+                  <th className="p-3">Auton</th>
+                  <th className="p-3">Skills</th>
+                  <th className="p-3">Fit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lookupTeams.map((team) => (
+                  <tr className="border-t border-line" key={team.number}>
+                    <td className="p-3 font-medium">{team.number}<p className="text-xs font-normal text-slate-500">{team.name}</p></td>
+                    <td className="p-3">{team.avgScore || '-'}</td>
+                    <td className="p-3">{team.winRate ? `${Math.round(team.winRate * 100)}%` : '-'}</td>
+                    <td className="p-3">{team.consistency || '-'}</td>
+                    <td className="p-3">{team.autonSignal || '-'}</td>
+                    <td className="p-3">{team.skills || '-'}</td>
+                    <td className="p-3 text-electric">{score(team)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mobile-team-list mt-3 space-y-2">
+              {lookupTeams.map((team) => (
+                <article className="rounded-lg border border-line bg-white/5 p-3" key={team.number}>
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">{team.number}</p>
+                      <p className="text-xs text-slate-500">{team.name}</p>
+                    </div>
+                    <p className="shrink-0 text-sm font-semibold text-electric">Fit {score(team)}</p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <span>Avg <b>{team.avgScore || '-'}</b></span>
+                    <span>Win <b>{team.winRate ? `${Math.round(team.winRate * 100)}%` : '-'}</b></span>
+                    <span>Auton <b>{team.autonSignal || '-'}</b></span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            {ranked.slice(0, 5).map((team, index) => (
+              <article className="panel p-4" key={team.number}>
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-lg font-semibold">#{index + 1} {team.number} · {team.name}</p>
+                    <p className="text-sm text-slate-400">Recommended because: {team.tags.slice(0, 2).join(', ')}</p>
+                  </div>
+                  <p className="rounded-full border border-electric/40 px-3 py-1 text-sm font-semibold text-electric">Fit {score(team)}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+        <aside className="space-y-4">
+          <section className="panel p-5">
+            <h2 className="font-semibold">Live events</h2>
+            <div className="mt-3 space-y-2">
+              {liveEvents.slice(0, 5).map((event) => (
+                <Link className="block rounded-lg border border-line bg-white/5 p-3" to={`/app/events/${event.id}`} key={event.id}>
+                  <p className="text-sm font-medium">{event.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">{event.location} · {event.date}</p>
+                </Link>
+              ))}
+            </div>
+          </section>
+          <section className="panel p-5">
+            <h2 className="font-semibold">RoboLab tools</h2>
+            <div className="mt-3 grid gap-2">
+              {[
+                ['Robot workspace', '/app/robots', Bot],
+                ['Autonomous planner', '/app/path', Compass],
+                ['Troubleshooting', '/app/debug', BrainCircuit],
+              ].map(([label, to, Icon]) => (
+                <Link className="flex items-center gap-3 rounded-lg border border-line bg-white/5 p-3 text-sm" to={to as string} key={label as string}>
+                  <Icon className="text-electric" size={18} />
+                  {label as string}
+                </Link>
+              ))}
+            </div>
+          </section>
+          <section className="panel p-5">
+            <h2 className="font-semibold">Pick list tiers</h2>
+            {['A', 'B', 'C', 'D'].map((tier) => (
+              <div className="mt-3 rounded-lg border border-line bg-ink/45 p-3" key={tier}>
+                <p className="text-sm font-medium">Tier {tier}</p>
+                <p className="text-xs text-slate-500">Drag teams here during alliance selection.</p>
+              </div>
+            ))}
+          </section>
         </aside>
       </div>
     </>

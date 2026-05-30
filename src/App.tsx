@@ -1,4 +1,4 @@
-import { Bot, Code2, Compass, Gauge, Globe2, Search, Settings, Star, Trophy } from 'lucide-react';
+import { Gauge, Globe2, Search, Settings, Star } from 'lucide-react';
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
   AllianceBuilder,
@@ -21,13 +21,6 @@ const tabs = [
   { to: '/app/compare', label: 'TrueSkill', icon: Gauge },
   { to: '/app/alliance', label: 'Lookup', icon: Search },
   { to: '/app/settings', label: 'Settings', icon: Settings },
-];
-
-const featureLinks = [
-  { to: '/app/robots', label: 'Robots', icon: Bot },
-  { to: '/app/path', label: 'Planner', icon: Compass },
-  { to: '/app/debug', label: 'Debug', icon: Code2 },
-  { to: '/app/events/v5rc-la-qualifier', label: 'Event', icon: Trophy },
 ];
 
 function titleFor(pathname: string) {
@@ -75,15 +68,6 @@ function AppShell() {
           <Route path="settings" element={<SettingsPage />} />
         </Routes>
       </main>
-
-      <div className="feature-strip" aria-label="Additional RoboLab tools">
-        {featureLinks.map((item) => (
-          <NavLink key={item.to} to={item.to} className={({ isActive }) => `feature-link ${isActive ? 'active' : ''}`}>
-            <item.icon size={17} />
-            <span>{item.label}</span>
-          </NavLink>
-        ))}
-      </div>
 
       <nav className="ios-tabbar">
         {tabs.map((item) => (

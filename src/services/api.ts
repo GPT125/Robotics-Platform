@@ -8,22 +8,159 @@ export async function apiOk<T>(data: T, meta?: Record<string, unknown>): Promise
   return { ok: true, data, meta };
 }
 
+type RobotEventsEntity = Record<string, unknown>;
+
+function asRecord(value: unknown): RobotEventsEntity {
+  return value && typeof value === 'object' ? (value as RobotEventsEntity) : {};
+}
+
+function text(value: unknown, fallback = '') {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : fallback;
+}
+
+function num(value: unknown, fallback = 0) {
+  return typeof value === 'number' ? value : Number(value) || fallback;
+}
+
+async function fetchRobotEvents<T>(path: string, fallback: T): Promise<ApiResponse<T>> {
+  try {
+    const response = await fetch(path);
+    const json = await response.json();
+
+    if (!response.ok || json?.ok === false) {
+      return {
+        ok: true,
+        data: fallback,
+        meta: {
+          source: 'fallback',
+          liveStatus: 'Offline',
+          error: json?.error?.message ?? `RobotEvents returned ${response.status}`,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      data: json.data as T,
+      meta: {
+        source: 'RobotEvents',
+        liveStatus: 'Fresh',
+        fetchedAt: new Date().toISOString(),
+        pagination: json.meta,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: true,
+      data: fallback,
+      meta: {
+        source: 'fallback',
+        liveStatus: 'Offline',
+        error: error instanceof Error ? error.message : 'RobotEvents request failed',
+      },
+    };
+  }
+}
+
+function normalizeEvent(raw: unknown): EventSummary {
+  const event = asRecord(raw);
+  const location = asRecord(event.location);
+  const divisions = Array.isArray(event.divisions) ? event.divisions : [];
+  const firstDivision = asRecord(divisions[0]);
+
+  return {
+    id: text(event.id, text(event.sku, currentEvent.id)),
+    name: text(event.name, currentEvent.name),
+    location: [location.city, location.region, location.country].map((part) => text(part)).filter(Boolean).join(', ') || currentEvent.location,
+    date: text(event.start, currentEvent.date).slice(0, 10),
+    status: 'Fresh',
+    teamCount: num(event.team_count, currentEvent.teamCount),
+    division: text(firstDivision.name, currentEvent.division),
+  };
+}
+
+function normalizeTeam(raw: unknown): Team {
+  const team = asRecord(raw);
+  const location = asRecord(team.location);
+  const number = text(team.number, 'Unknown');
+
+  return {
+    number,
+    name: text(team.team_name, text(team.name, 'RobotEvents team')),
+    organization: text(team.organization, 'Unknown organization'),
+    region: text(location.region, text(location.country, '')),
+    winRate: 0,
+    avgScore: 0,
+    maxScore: 0,
+    consistency: 0,
+    autonSignal: 0,
+    skills: 0,
+    risk: 0,
+    tags: ['live RobotEvents'],
+    confidence: 'Low data',
+  };
+}
+
+function allianceTeamLabel(raw: unknown) {
+  const entry = asRecord(raw);
+  const nested = asRecord(entry.team);
+  return text(nested.name, text(nested.number, text(entry.number, text(entry.name))));
+}
+
+function normalizeMatch(raw: unknown): Match {
+  const match = asRecord(raw);
+  const alliances = Array.isArray(match.alliances) ? match.alliances.map(asRecord) : [];
+  const red = asRecord(alliances.find((alliance) => text(alliance.color).toLowerCase() === 'red'));
+  const blue = asRecord(alliances.find((alliance) => text(alliance.color).toLowerCase() === 'blue'));
+  const redTeams = Array.isArray(red.teams) ? red.teams.map(allianceTeamLabel).filter(Boolean) : [];
+  const blueTeams = Array.isArray(blue.teams) ? blue.teams.map(allianceTeamLabel).filter(Boolean) : [];
+
+  return {
+    id: text(match.id, crypto.randomUUID()),
+    number: `${text(match.round, 'Q')}${text(match.instance, text(match.matchnum, ''))}`,
+    field: text(match.field, 'Field'),
+    startsAt: text(match.scheduled, 'TBD').slice(11, 16) || 'TBD',
+    red: redTeams.length ? redTeams : ['TBD'],
+    blue: blueTeams.length ? blueTeams : ['TBD'],
+    redScore: typeof red.score === 'number' ? red.score : undefined,
+    blueScore: typeof blue.score === 'number' ? blue.score : undefined,
+    prediction: {
+      winner: 'red',
+      probability: 0.5,
+      confidence: 'Low data',
+      reasons: ['Live official match data loaded; prediction needs scouting metrics.'],
+    },
+  };
+}
+
 export const robotEventsAdapter = {
-  async searchEvents(): Promise<ApiResponse<EventSummary[]>> {
-    return apiOk([currentEvent], {
-      cacheStatus: currentEvent.status,
-      source: 'Mock RobotEvents adapter. Replace server implementation with ROBOTEVENTS_API_TOKEN.',
-    });
+  async searchEvents(query = ''): Promise<ApiResponse<EventSummary[]>> {
+    const params = new URLSearchParams({ per_page: '12' });
+    if (query.trim()) params.set('name', query.trim());
+    const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/events?${params.toString()}`, [currentEvent]);
+    return response.ok ? { ...response, data: response.data.map(normalizeEvent) } : response;
   },
-  async getEventMatches(): Promise<ApiResponse<Match[]>> {
-    return apiOk(matches, { refreshSeconds: 60, cacheStatus: 'Fresh' });
+  async getEventMatches(eventId?: string): Promise<ApiResponse<Match[]>> {
+    if (!eventId || !/^\d+$/.test(eventId)) {
+      return apiOk(matches, { source: 'fallback', liveStatus: 'Stale', error: 'Select a live RobotEvents event to load official matches.' });
+    }
+    const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/events/${eventId}/matches?per_page=100`, matches);
+    return response.ok ? { ...response, data: response.data.map(normalizeMatch) } : response;
   },
   async searchTeams(query = ''): Promise<ApiResponse<Team[]>> {
-    const normalized = query.trim().toLowerCase();
-    const result = normalized
-      ? teams.filter((team) => `${team.number} ${team.name} ${team.tags.join(' ')}`.toLowerCase().includes(normalized))
+    const normalized = query.trim();
+    if (normalized) {
+      const params = new URLSearchParams({ per_page: '20' });
+      params.append('number[]', normalized);
+      const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/teams?${params.toString()}`, []);
+      if (response.ok && response.data.length) return { ...response, data: response.data.map(normalizeTeam) };
+    }
+
+    const lower = normalized.toLowerCase();
+    const result = lower
+      ? teams.filter((team) => `${team.number} ${team.name} ${team.tags.join(' ')}`.toLowerCase().includes(lower))
       : teams;
-    return apiOk(result, { normalized: true });
+    return apiOk(result, { source: 'fallback', liveStatus: normalized ? 'Stale' : 'Demo' });
   },
 };
 

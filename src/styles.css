@@ -53,7 +53,7 @@ a {
   background:
     linear-gradient(180deg, rgba(255, 59, 48, 0.08), transparent 220px),
     var(--rs-bg);
-  padding-bottom: 148px;
+  padding-bottom: 96px;
 }
 
 .ios-topbar {
@@ -115,16 +115,20 @@ a {
 
 .ios-tabbar {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 50%;
+  right: auto;
+  bottom: max(env(safe-area-inset-bottom), 10px);
   z-index: 30;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(74px, 1fr));
   gap: 2px;
-  padding: 7px 8px max(env(safe-area-inset-bottom), 7px);
+  width: min(760px, calc(100vw - 20px));
+  transform: translateX(-50%);
+  padding: 7px;
   background: rgba(248, 248, 248, 0.94);
-  border-top: 1px solid rgba(60, 60, 67, 0.18);
+  border: 1px solid rgba(60, 60, 67, 0.18);
+  border-radius: 24px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
   backdrop-filter: blur(22px);
 }
 
@@ -146,42 +150,6 @@ a {
 .ios-tabbar a.active {
   color: var(--rs-red);
   background: rgba(255, 59, 48, 0.08);
-}
-
-.feature-strip {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 65px;
-  z-index: 29;
-  display: flex;
-  gap: 8px;
-  padding: 8px 12px;
-  overflow-x: auto;
-  background: rgba(242, 242, 247, 0.88);
-  border-top: 1px solid rgba(60, 60, 67, 0.1);
-  backdrop-filter: blur(18px);
-}
-
-.feature-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  color: var(--rs-secondary);
-  background: white;
-  border: 1px solid rgba(60, 60, 67, 0.12);
-  font-size: 13px;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(60, 60, 67, 0.06);
-}
-
-.feature-link.active {
-  color: white;
-  background: var(--rs-red);
-  border-color: var(--rs-red);
 }
 
 .panel {
@@ -308,7 +276,7 @@ main h2 {
 section.panel,
 article.panel,
 aside.panel {
-  overflow: hidden;
+  overflow: visible;
 }
 
 select,
@@ -323,6 +291,28 @@ input {
 table {
   border-collapse: separate;
   border-spacing: 0;
+}
+
+.mobile-team-list {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .desktop-table {
+    display: none;
+  }
+
+  .mobile-team-list {
+    display: block;
+  }
+
+  .lookup-search {
+    flex-direction: column;
+  }
+
+  .lookup-search button {
+    width: 100%;
+  }
 }
 
 thead {
@@ -366,10 +356,6 @@ svg rect[fill="#FF7A18"] {
   .ios-content {
     padding-top: 26px;
   }
-
-  .feature-strip {
-    justify-content: center;
-  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -385,8 +371,7 @@ svg rect[fill="#FF7A18"] {
   }
 
   .ios-topbar,
-  .ios-tabbar,
-  .feature-strip {
+  .ios-tabbar {
     background: rgba(28, 28, 30, 0.9);
   }
 
