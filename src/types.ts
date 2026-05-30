@@ -1,5 +1,3 @@
-import type { LucideIcon } from 'lucide-react';
-
 export type ApiResponse<T> =
   | { ok: true; data: T; meta?: Record<string, unknown> }
   | { ok: false; error: { code: string; message: string; details?: unknown } };
@@ -88,12 +86,4 @@ export type CodePatch = {
   newText: string;
   reason: string;
   generatedBy: 'path_planner' | 'motor_mapper' | 'troubleshooter';
-};
-
-export type QuickAction = {
-  label: string;
-  description: string;
-  icon: LucideIcon;
-  to: string;
-  accent: 'blue' | 'cyan' | 'orange' | 'green' | 'red';
 };
