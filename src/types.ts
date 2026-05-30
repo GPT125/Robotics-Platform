@@ -20,6 +20,23 @@ export type Team = {
   confidence: Confidence;
 };
 
+export type TeamTrendYear = {
+  season: string;
+  year: number;
+  events: number;
+  matches: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  winRate: number;
+  avgRank: number;
+  bestRank: number;
+  bestSkills: number;
+  avgScore: number;
+  maxScore: number;
+  opr: number;
+};
+
 export type Match = {
   id: string;
   number: string;

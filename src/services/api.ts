@@ -1,4 +1,4 @@
-import type { AiAdvice, CodePatch, EventSummary, IntegrationStatus, Match, RobotProject, SponsorSignal, Team, ApiResponse } from '../types';
+import type { AiAdvice, CodePatch, EventSummary, IntegrationStatus, Match, RobotProject, SponsorSignal, Team, TeamTrendYear, ApiResponse } from '../types';
 
 const delay = (ms = 260) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -29,6 +29,10 @@ function text(value: unknown, fallback = '') {
 
 function num(value: unknown, fallback = 0) {
   return typeof value === 'number' ? value : Number(value) || fallback;
+}
+
+function bool(value: unknown) {
+  return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
 }
 
 async function fetchRobotEvents<T>(path: string, fallback: T): Promise<ApiResponse<T>> {
@@ -110,6 +114,150 @@ function normalizeTeam(raw: unknown): Team {
   };
 }
 
+async function fetchVexDb<T>(path: string, fallback: T): Promise<ApiResponse<T>> {
+  try {
+    const response = await fetch(`https://api.vexdb.io/v1/${path}`);
+    const json = await response.json();
+    if (!response.ok || json?.status !== 1) {
+      return apiOk(fallback, { source: 'VexDB', liveStatus: 'Stale', error: json?.error_text ?? `VexDB returned ${response.status}` });
+    }
+    return apiOk((Array.isArray(json.result) ? json.result : fallback) as T, { source: 'VexDB', liveStatus: 'Fresh' });
+  } catch (error) {
+    return apiOk(fallback, { source: 'fallback', liveStatus: 'Offline', error: error instanceof Error ? error.message : 'VexDB request failed' });
+  }
+}
+
+function normalizeVexDbTeam(raw: unknown): Team {
+  const team = asRecord(raw);
+  const number = text(team.number, 'Unknown');
+  const registered = bool(team.is_registered);
+
+  return {
+    number,
+    name: text(team.team_name, 'VRC team'),
+    organization: text(team.organisation, 'Unknown organization'),
+    region: [team.city, team.region, team.country].map((part) => text(part)).filter(Boolean).join(', '),
+    winRate: 0,
+    avgScore: 0,
+    maxScore: 0,
+    consistency: 0,
+    autonSignal: 0,
+    skills: 0,
+    risk: registered ? 12 : 24,
+    tags: [registered ? 'registered' : 'historical', 'VRC data'],
+    confidence: registered ? 'Medium confidence' : 'Low data',
+  };
+}
+
+function seasonFromSku(sku: unknown) {
+  const match = text(sku).match(/RE-VRC-(\d{2})-/i);
+  return match ? 2000 + Number(match[1]) : 0;
+}
+
+function seasonFromDate(value: unknown) {
+  const year = Number(text(value).slice(0, 4));
+  return Number.isFinite(year) ? year : 0;
+}
+
+function seasonLabel(year: number) {
+  return year ? `${year}-${String(year + 1).slice(2)}` : 'Unknown';
+}
+
+function buildTrendRows(args: { rankings: unknown[]; skills: unknown[]; matches: unknown[]; teamNumber: string }): TeamTrendYear[] {
+  const years = new Map<number, {
+    events: Set<string>;
+    matches: number;
+    wins: number;
+    losses: number;
+    ties: number;
+    matchWins: number;
+    matchLosses: number;
+    matchTies: number;
+    ranks: number[];
+    skills: number[];
+    scores: number[];
+    opr: number[];
+  }>();
+  const ensure = (year: number) => {
+    const safeYear = year || new Date().getFullYear();
+    if (!years.has(safeYear)) {
+      years.set(safeYear, { events: new Set(), matches: 0, wins: 0, losses: 0, ties: 0, matchWins: 0, matchLosses: 0, matchTies: 0, ranks: [], skills: [], scores: [], opr: [] });
+    }
+    return years.get(safeYear)!;
+  };
+
+  args.rankings.forEach((entryRaw) => {
+    const entry = asRecord(entryRaw);
+    const year = seasonFromSku(entry.sku);
+    const bucket = ensure(year);
+    const sku = text(entry.sku);
+    if (sku) bucket.events.add(sku);
+    bucket.wins += num(entry.wins);
+    bucket.losses += num(entry.losses);
+    bucket.ties += num(entry.ties);
+    if (num(entry.rank)) bucket.ranks.push(num(entry.rank));
+    if (num(entry.max_score)) bucket.scores.push(num(entry.max_score));
+    if (num(entry.opr)) bucket.opr.push(num(entry.opr));
+  });
+
+  args.skills.forEach((entryRaw) => {
+    const entry = asRecord(entryRaw);
+    const bucket = ensure(seasonFromSku(entry.sku));
+    const sku = text(entry.sku);
+    if (sku) bucket.events.add(sku);
+    if (num(entry.score)) bucket.skills.push(num(entry.score));
+  });
+
+  args.matches.forEach((entryRaw) => {
+    const entry = asRecord(entryRaw);
+    const year = seasonFromDate(entry.scheduled) || seasonFromSku(entry.sku);
+    const bucket = ensure(year);
+    const sku = text(entry.sku);
+    if (sku) bucket.events.add(sku);
+    const redTeams = [entry.red1, entry.red2, entry.red3].map((team) => text(team).toUpperCase());
+    const blueTeams = [entry.blue1, entry.blue2, entry.blue3].map((team) => text(team).toUpperCase());
+    const onRed = redTeams.includes(args.teamNumber.toUpperCase());
+    const onBlue = blueTeams.includes(args.teamNumber.toUpperCase());
+    const redScore = num(entry.redscore);
+    const blueScore = num(entry.bluescore);
+    if (!onRed && !onBlue) return;
+    bucket.matches += 1;
+    bucket.scores.push(onRed ? redScore : blueScore);
+    if (redScore === blueScore) bucket.matchTies += 1;
+    else if ((onRed && redScore > blueScore) || (onBlue && blueScore > redScore)) bucket.matchWins += 1;
+    else bucket.matchLosses += 1;
+  });
+
+  return Array.from(years.entries())
+    .map(([year, bucket]) => {
+      const rankedDecisions = bucket.wins + bucket.losses + bucket.ties;
+      const wins = rankedDecisions ? bucket.wins : bucket.matchWins;
+      const losses = rankedDecisions ? bucket.losses : bucket.matchLosses;
+      const ties = rankedDecisions ? bucket.ties : bucket.matchTies;
+      const decided = wins + losses + ties;
+      const avg = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+      return {
+        season: seasonLabel(year),
+        year,
+        events: bucket.events.size,
+        matches: rankedDecisions ? decided : bucket.matches || decided,
+        wins,
+        losses,
+        ties,
+        winRate: decided ? wins / decided : 0,
+        avgRank: Math.round(avg(bucket.ranks)),
+        bestRank: bucket.ranks.length ? Math.min(...bucket.ranks) : 0,
+        bestSkills: bucket.skills.length ? Math.max(...bucket.skills) : 0,
+        avgScore: Math.round(avg(bucket.scores)),
+        maxScore: bucket.scores.length ? Math.max(...bucket.scores) : 0,
+        opr: Math.round(avg(bucket.opr) * 10) / 10,
+      };
+    })
+    .sort((a, b) => b.year - a.year)
+    .slice(0, 5)
+    .sort((a, b) => a.year - b.year);
+}
+
 function allianceTeamLabel(raw: unknown) {
   const entry = asRecord(raw);
   const nested = asRecord(entry.team);
@@ -159,13 +307,32 @@ export const robotEventsAdapter = {
   async searchTeams(query = ''): Promise<ApiResponse<Team[]>> {
     const normalized = query.trim();
     if (normalized) {
-      const params = new URLSearchParams({ per_page: '20' });
+      const params = new URLSearchParams({ per_page: '20', myTeams: 'false' });
       params.append('number[]', normalized);
+      params.append('program[]', '1');
       const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/teams?${params.toString()}`, []);
       if (response.ok && response.data.length) return { ...response, data: response.data.map(normalizeTeam) };
+
+      const fallback = await fetchVexDb<unknown[]>(`get_teams?team=${encodeURIComponent(normalized)}`, []);
+      return fallback.ok ? { ...fallback, data: fallback.data.map(normalizeVexDbTeam) } : fallback;
     }
 
     return apiOk([], { source: 'fallback', liveStatus: normalized ? 'Stale' : 'Fresh' });
+  },
+  async getTeamTrends(query = ''): Promise<ApiResponse<TeamTrendYear[]>> {
+    const normalized = query.trim();
+    if (!normalized) return apiOk([], { source: 'fallback', liveStatus: 'Fresh' });
+    const [rankings, skills, matches] = await Promise.all([
+      fetchVexDb<unknown[]>(`get_rankings?team=${encodeURIComponent(normalized)}`, []),
+      fetchVexDb<unknown[]>(`get_skills?team=${encodeURIComponent(normalized)}`, []),
+      fetchVexDb<unknown[]>(`get_matches?team=${encodeURIComponent(normalized)}`, []),
+    ]);
+    return apiOk(buildTrendRows({
+      rankings: rankings.ok ? rankings.data : [],
+      skills: skills.ok ? skills.data : [],
+      matches: matches.ok ? matches.data : [],
+      teamNumber: normalized,
+    }), { source: 'VexDB', liveStatus: 'Fresh' });
   },
 };
 

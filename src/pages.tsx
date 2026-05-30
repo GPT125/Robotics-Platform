@@ -28,7 +28,7 @@ import {
   X,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { CartesianGrid, Line, LineChart as ReLineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { MetricCard } from './components/MetricCard';
 import { RobotScene } from './components/RobotScene';
@@ -555,7 +555,8 @@ export function CompareTeams() {
 }
 
 export function AllianceBuilder() {
-  const [teamQuery, setTeamQuery] = useState('');
+  const [searchParams] = useSearchParams();
+  const [teamQuery, setTeamQuery] = useState(searchParams.get('team') ?? '');
   const [pickList, setPickList] = useState<Team[]>([]);
   const [selectionMode, setSelectionMode] = useState(false);
   const eventsQuery = useQuery({
@@ -569,8 +570,21 @@ export function AllianceBuilder() {
     enabled: teamQuery.trim().length > 1,
     staleTime: 60_000,
   });
+  const trendsQuery = useQuery({
+    queryKey: ['team-trends', teamQuery],
+    queryFn: () => robotEventsAdapter.getTeamTrends(teamQuery),
+    enabled: teamQuery.trim().length > 1,
+    staleTime: 60_000,
+  });
   const lookupTeams = teamsQuery.data?.ok ? teamsQuery.data.data : [];
   const liveEvents = eventsQuery.data?.ok ? eventsQuery.data.data : [];
+  const teamTrends = trendsQuery.data?.ok ? trendsQuery.data.data : [];
+  const selectedTeam = lookupTeams[0];
+  const latestTrend = teamTrends.at(-1);
+  const totalTrendEvents = teamTrends.reduce((total, row) => total + row.events, 0);
+  const bestTrendSkills = Math.max(0, ...teamTrends.map((row) => row.bestSkills));
+  const rankedSeasons = teamTrends.map((row) => row.bestRank).filter(Boolean);
+  const bestTrendRank = rankedSeasons.length ? Math.min(...rankedSeasons) : 0;
 
   return (
     <>
@@ -586,7 +600,7 @@ export function AllianceBuilder() {
         <section className="space-y-4">
           <div className="panel p-4">
             <label className="text-sm font-medium text-slate-400" htmlFor="team-search">Team lookup</label>
-            <div className="lookup-search mt-2 flex gap-2">
+            <form className="lookup-search mt-2 flex gap-2" onSubmit={(event) => { event.preventDefault(); void teamsQuery.refetch(); void trendsQuery.refetch(); }}>
               <input
                 id="team-search"
                 className="h-11 min-w-0 flex-1 rounded-lg border border-line px-3 text-sm"
@@ -594,12 +608,85 @@ export function AllianceBuilder() {
                 onChange={(event) => setTeamQuery(event.target.value)}
                 placeholder="Search a team number"
               />
-              <SecondaryButton onClick={() => { void teamsQuery.refetch(); }}>
-                <Search size={18} /> Search
+              <SecondaryButton type="submit">
+                <Search size={18} /> {teamsQuery.isFetching || trendsQuery.isFetching ? 'Searching...' : 'Search'}
               </SecondaryButton>
-            </div>
+            </form>
             {teamsQuery.data?.ok && teamsQuery.data.meta?.error ? <p className="mt-2 text-sm text-bad">{String(teamsQuery.data.meta.error)}</p> : null}
           </div>
+
+          {selectedTeam ? (
+            <div className="panel p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-400">Team profile</p>
+                  <h2 className="mt-1 text-2xl font-semibold text-white">{selectedTeam.number} · {selectedTeam.name}</h2>
+                  <p className="mt-1 text-sm text-slate-400">{selectedTeam.organization} · {selectedTeam.region || 'Region unavailable'}</p>
+                </div>
+                <Link className="rounded-lg border border-line px-3 py-2 text-sm hover:border-electric/50" to={`/app/teams/${selectedTeam.number}`}>
+                  Full profile
+                </Link>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                <MetricCard label="Events tracked" value={`${totalTrendEvents}`} detail="Past five seasons" icon={Trophy} tone="orange" />
+                <MetricCard label="Best skills" value={bestTrendSkills ? `${bestTrendSkills}` : '-'} detail="Highest official skills score found" icon={Gauge} tone="green" />
+                <MetricCard label="Latest win rate" value={latestTrend ? `${Math.round(latestTrend.winRate * 100)}%` : '-'} detail={latestTrend?.season ?? 'No matches loaded'} icon={LineChart} tone="cyan" />
+                <MetricCard label="Best rank" value={bestTrendRank ? `${bestTrendRank}` : '-'} detail="Lowest event ranking number" icon={Activity} tone="blue" />
+              </div>
+            </div>
+          ) : null}
+
+          {teamTrends.length ? (
+            <div className="panel p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-semibold">Past 5 year trends</h2>
+                  <p className="mt-1 text-sm text-slate-400">Season-by-season rankings, skills, scores, and match record.</p>
+                </div>
+                <span className="rounded-full border border-line px-3 py-1 text-xs text-slate-400">{trendsQuery.data?.ok ? String(trendsQuery.data.meta?.source ?? 'Live data') : 'Live data'}</span>
+              </div>
+              <div className="mt-4 h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ReLineChart data={teamTrends}>
+                    <CartesianGrid stroke="#24314F" />
+                    <XAxis dataKey="season" stroke="#94a3b8" />
+                    <YAxis stroke="#94a3b8" />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="bestSkills" name="Best skills" stroke="#22D3EE" strokeWidth={3} />
+                    <Line type="monotone" dataKey="avgScore" name="Avg score" stroke="#FF3B30" strokeWidth={3} />
+                    <Line type="monotone" dataKey="opr" name="OPR" stroke="#34C759" strokeWidth={3} />
+                  </ReLineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="text-xs uppercase text-slate-500">
+                    <tr>
+                      {['Season', 'Events', 'Matches', 'Record', 'Win', 'Avg rank', 'Best rank', 'Best skills', 'Avg score', 'OPR'].map((head) => <th className="p-3" key={head}>{head}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamTrends.map((row) => (
+                      <tr className="border-t border-line" key={row.season}>
+                        <td className="p-3 font-medium text-white">{row.season}</td>
+                        <td className="p-3">{row.events}</td>
+                        <td className="p-3">{row.matches}</td>
+                        <td className="p-3">{row.wins}-{row.losses}-{row.ties}</td>
+                        <td className="p-3">{Math.round(row.winRate * 100)}%</td>
+                        <td className="p-3">{row.avgRank || '-'}</td>
+                        <td className="p-3">{row.bestRank || '-'}</td>
+                        <td className="p-3">{row.bestSkills || '-'}</td>
+                        <td className="p-3">{row.avgScore || '-'}</td>
+                        <td className="p-3">{row.opr || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : teamQuery.trim().length > 1 && !trendsQuery.isFetching ? (
+            <EmptyState title="No historical trend found" detail="The lookup found no season history for this team number yet." />
+          ) : null}
 
           <div className="panel p-4">
             <h2 className="font-semibold">Compare and partner ranking</h2>
