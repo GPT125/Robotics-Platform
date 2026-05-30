@@ -15,7 +15,6 @@ import {
   GitCompare,
   Info,
   LineChart,
-  Lock,
   RefreshCw,
   Play,
   Plus,
@@ -82,14 +81,15 @@ function LiveStatus({ status, detail }: { status: unknown; detail?: unknown }) {
 function AiCoachPanel({ title, task, context }: { title: string; task: string; context: string }) {
   const [loading, setLoading] = useState(false);
   const [advice, setAdvice] = useState('');
-  const [providers, setProviders] = useState<Array<{ provider: string; status: string; model?: string; error?: string }>>([]);
+  const [reviewStatus, setReviewStatus] = useState('');
 
   async function runCoach() {
     setLoading(true);
     const response = await aiAdvisor.ask(task, context);
     if (response.ok) {
       setAdvice(response.data.summary);
-      setProviders(response.data.providers.map(({ provider, status, model, error }) => ({ provider, status, model, error })));
+      const completed = response.data.providers.filter((provider) => provider.status === 'ok').length;
+      setReviewStatus(completed ? `${completed} AI reviewer${completed === 1 ? '' : 's'} completed analysis.` : 'AI analysis completed with limited coverage.');
     }
     setLoading(false);
   }
@@ -99,21 +99,13 @@ function AiCoachPanel({ title, task, context }: { title: string; task: string; c
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-semibold">{title}</h2>
-          <p className="mt-1 text-sm text-slate-400">Groq, DeepSeek, OpenRouter, HuggingFace, and OpenAI are checked server-side when configured.</p>
+          <p className="mt-1 text-sm text-slate-400">Runs a private multi-reviewer analysis through the server.</p>
         </div>
         <PrimaryButton onClick={runCoach}>
           <Sparkles size={18} /> {loading ? 'Asking AI...' : 'Ask AI team'}
         </PrimaryButton>
       </div>
-      {providers.length ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {providers.map((provider) => (
-            <span className="rounded-full border border-line bg-white/5 px-3 py-1 text-xs" title={provider.error} key={provider.provider}>
-              {provider.provider} · {provider.status}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      {reviewStatus ? <p className="mt-4 rounded-lg border border-line bg-white/5 px-3 py-2 text-xs text-slate-400">{reviewStatus}</p> : null}
       {advice ? <pre className="mt-4 max-h-72 overflow-auto rounded-lg border border-line bg-ink p-4 text-xs leading-5 text-slate-300 whitespace-pre-wrap">{advice}</pre> : null}
     </section>
   );
@@ -265,44 +257,27 @@ export function Dashboard() {
           </Link>
         </div>
       </SectionHeader>
-      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
-        <div className="space-y-4">
-          <div className="data-grid">
-            <MetricCard label="Current event" value={liveEvent?.name ?? 'Select an event'} detail={liveEvent ? `${liveEvent.teamCount} teams in ${liveEvent.division}` : 'Live RobotEvents data appears here'} icon={Trophy} tone="orange" />
-            <MetricCard label="Next match" value="Not selected" detail="Choose a live event to load official matches" icon={Activity} tone="cyan" />
-            <MetricCard label="Team rank" value="-" detail="Search a team number to load metrics" icon={LineChart} tone="green" />
-            <MetricCard label="Robot status" value="No code loaded" detail="Upload a VEXcode folder to simulate" icon={Gauge} tone="blue" />
-          </div>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {dashboardActions.map(([title, detail, Icon, to]) => (
-              <Link className="panel group p-5 transition hover:-translate-y-0.5 hover:border-electric/50" to={to} key={title}>
-                <Icon className="text-electric" />
-                <h2 className="mt-4 font-semibold text-white">{title}</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-400">{detail}</p>
-              </Link>
-            ))}
-          </section>
-          <AiCoachPanel
-            title="AI competition command center"
-            task="Recommend the most useful RoboLab actions for a VEX V5 team opening a fresh competition workspace."
-            context={`Live event: ${liveEvent?.name ?? 'none selected'}\nKnown user concerns from VEX communities: drivetrain smoothness, motor configuration, autonomous repeatability, code review, CAD legality, scouting workflow, inspection readiness.`}
-          />
+      <div className="space-y-4">
+        <div className="data-grid">
+          <MetricCard label="Current event" value={liveEvent?.name ?? 'Select an event'} detail={liveEvent ? `${liveEvent.teamCount} teams in ${liveEvent.division}` : 'Live RobotEvents data appears here'} icon={Trophy} tone="orange" />
+          <MetricCard label="Next match" value="Not selected" detail="Choose a live event to load official matches" icon={Activity} tone="cyan" />
+          <MetricCard label="Team rank" value="-" detail="Search a team number to load metrics" icon={LineChart} tone="green" />
+          <MetricCard label="Robot status" value="No code loaded" detail="Upload a VEXcode folder to simulate" icon={Gauge} tone="blue" />
         </div>
-        <aside className="panel p-5">
-          <h2 className="font-semibold text-white">Insight rail</h2>
-          <div className="mt-4 space-y-3">
-            {[
-              ['Live data', eventsQuery.data?.ok && eventsQuery.data.meta?.error ? String(eventsQuery.data.meta.error) : 'RobotEvents refreshes every 60 seconds through the server-side token proxy.'],
-              ['Official CAD', 'VEX part and field source links are listed in the robot workspace and planner.'],
-              ['Simulation', 'Upload source code or draw a path to generate a session-specific timeline.'],
-            ].map(([title, detail]) => (
-              <div className="rounded-lg border border-line bg-ink/45 p-4" key={title}>
-                <p className="text-sm font-medium text-slate-200">{title}</p>
-                <p className="mt-2 text-sm leading-5 text-slate-400">{detail}</p>
-              </div>
-            ))}
-          </div>
-        </aside>
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {dashboardActions.map(([title, detail, Icon, to]) => (
+            <Link className="panel group p-5 transition hover:-translate-y-0.5 hover:border-electric/50" to={to} key={title}>
+              <Icon className="text-electric" />
+              <h2 className="mt-4 font-semibold text-white">{title}</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">{detail}</p>
+            </Link>
+          ))}
+        </section>
+        <AiCoachPanel
+          title="AI competition command center"
+          task="Recommend the most useful RoboLab actions for a VEX V5 team opening a fresh competition workspace."
+          context={`Live event: ${liveEvent?.name ?? 'none selected'}\nKnown user concerns from VEX communities: drivetrain smoothness, motor configuration, autonomous repeatability, code review, CAD legality, scouting workflow, inspection readiness.`}
+        />
       </div>
     </>
   );
@@ -376,7 +351,7 @@ export function ScoutWorkspace() {
                 ))}
               </div>
             </article>
-          )) : <EmptyState title="No scouting records yet" detail="Use the form to create this session's first record. RoboLab starts clean without preset teams or records." />}
+          )) : <EmptyState title="No scouting records yet" detail="Use the form to create this session's first record. RoboLab starts clean for each workspace." />}
         </section>
       </div>
     </>
@@ -510,7 +485,7 @@ export function TeamProfile() {
             {team.tags.map((tag) => <span className="rounded-full border border-line px-2 py-1 text-xs" key={tag}>{tag}</span>)}
           </div>
         </aside>
-      </div> : <EmptyState title="No team loaded" detail="Search from Lookup or open a live team profile. Fresh workspaces do not show preset team profiles." />}
+      </div> : <EmptyState title="No team loaded" detail="Search from Lookup or open a live team profile." />}
     </>
   );
 }
@@ -558,7 +533,7 @@ export function CompareTeams() {
                 </tr>
               ))}
             </tbody>
-          </table> : <EmptyState title="Search teams to compare" detail="Enter a VEX team number to load live RobotEvents team data. No preset ranking list is shown in a fresh workspace." />}
+          </table> : <EmptyState title="Search teams to compare" detail="Enter a VEX team number to load live RobotEvents team data." />}
         </section>
         <aside className="panel p-5">
           <h2 className="font-semibold">Why this matters</h2>
@@ -1148,7 +1123,21 @@ export function SettingsPage() {
     queryFn: integrationsAdapter.status,
   });
   const integrations = integrationsQuery.data?.ok ? integrationsQuery.data.data : [];
-  const configuredCount = integrations.filter((item) => item.configured).length;
+  const hasConnection = (terms: string[]) => integrations.some((item) => {
+    const searchable = item.feature.toLowerCase();
+    return item.configured && terms.some((term) => searchable.includes(term));
+  });
+  const connectionStatus = (terms: string[]) => {
+    if (integrationsQuery.isLoading) return 'Checking';
+    if (!integrations.length) return 'Needs setup';
+    return hasConnection(terms) ? 'Connected' : 'Needs setup';
+  };
+  const connections = [
+    ['Live event data', 'Official teams, events, and match schedules.', connectionStatus(['live', 'event', 'teams', 'matches'])],
+    ['AI assistant team', 'Strategy, debugging, code review, and scouting support.', connectionStatus(['ai', 'coach', 'code', 'reasoning', 'reviewer', 'model'])],
+    ['Sponsor research', 'News, market, and finance signals for outreach planning.', connectionStatus(['news', 'market', 'finance', 'sponsor', 'regional'])],
+    ['Workspace imports', 'Drive and folder-based project import surfaces.', connectionStatus(['google', 'drive', 'folder'])],
+  ];
   async function loadSponsorSignals() {
     setLoadingSignals(true);
     const response = await integrationsAdapter.sponsorSignals();
@@ -1157,34 +1146,23 @@ export function SettingsPage() {
   }
   return (
     <>
-      <SectionHeader eyebrow="Security" title="Settings and API keys" />
+      <SectionHeader eyebrow="Workspace" title="Settings">
+        <SecondaryButton onClick={() => { void integrationsQuery.refetch(); }}>
+          <RefreshCw size={18} /> Check connections
+        </SecondaryButton>
+      </SectionHeader>
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="panel p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="font-semibold">Environment variables</h2>
-            <SecondaryButton onClick={() => { void integrationsQuery.refetch(); }}>
-              <RefreshCw size={18} /> Refresh
-            </SecondaryButton>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-slate-400">
-            Add keys to the local `.env` file. Only `VITE_` variables can reach the browser; RobotEvents, Google client
-            secret, service role, database, and AI keys must stay server-side.
-          </p>
-          <p className="mt-3 text-sm font-medium text-slate-400">{configuredCount} of {integrations.length} integrations configured on the server.</p>
-          <div className="mt-4 grid gap-2 text-sm">
-            {(integrations.length ? integrations : [
-              { key: 'ROBOTEVENTS_API_TOKEN', configured: false, feature: 'Live event data' },
-              { key: 'GROQ_API_KEY', configured: false, feature: 'AI coach' },
-              { key: 'DEEPSEEK_API_KEY', configured: false, feature: 'AI code review' },
-              { key: 'OPENROUTER_API_KEY', configured: false, feature: 'AI strategy review' },
-            ]).map(({ key, configured, feature }) => (
-              <div className="flex items-center gap-2 rounded-lg border border-line bg-ink p-3" key={key}>
-                <Lock size={15} className={configured ? 'text-good' : 'text-slate-500'} />
+          <h2 className="font-semibold">Connected services</h2>
+          <div className="mt-4 grid gap-3 text-sm">
+            {connections.map(([title, detail, status]) => (
+              <div className="flex items-start gap-3 rounded-lg border border-line bg-ink p-4" key={title}>
+                <CheckCircle2 size={17} className={status === 'Connected' ? 'mt-0.5 shrink-0 text-good' : 'mt-0.5 shrink-0 text-slate-500'} />
                 <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{key}</span>
-                  <span className="block text-xs text-slate-500">{feature}</span>
+                  <span className="block font-medium text-white">{title}</span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500">{detail}</span>
                 </span>
-                <span className="rounded-full border border-line px-2 py-1 text-xs">{configured ? 'set' : 'empty'}</span>
+                <span className={`shrink-0 rounded-full border px-2 py-1 text-xs ${status === 'Connected' ? 'border-good/40 bg-good/10 text-good' : 'border-line text-slate-400'}`}>{status}</span>
               </div>
             ))}
           </div>
@@ -1195,7 +1173,7 @@ export function SettingsPage() {
             ['Debug assistant', 'Compares multiple AI opinions against VEX drivetrain, motor, and autonomous checklists.'],
             ['Code review', 'Reads uploaded VEXcode files and flags motor mapping, blocking commands, and repeatability risks.'],
             ['Alliance strategy', 'Reviews live team lookup and pick list gaps for scouting priorities.'],
-            ['Sponsor signals', 'News and finance keys are registered for future sponsor research workflows.'],
+            ['Sponsor signals', 'Researches current news and finance context for sponsor outreach.'],
           ].map(([title, detail]) => (
             <div className="mt-3 flex items-start gap-3 rounded-lg border border-line bg-white/5 p-3 text-sm" key={title}>
               <ShieldCheck className="mt-0.5 shrink-0 text-good" size={16} />
@@ -1209,7 +1187,7 @@ export function SettingsPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="font-semibold">Sponsor signals</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Uses news and finance keys for sponsor prospect research.</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Runs sponsor prospect research from the configured services.</p>
               </div>
               <SecondaryButton onClick={loadSponsorSignals}>
                 <Sparkles size={18} /> {loadingSignals ? 'Loading...' : 'Run signals'}
