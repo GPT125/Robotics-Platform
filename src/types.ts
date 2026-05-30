@@ -2,7 +2,6 @@ export type ApiResponse<T> =
   | { ok: true; data: T; meta?: Record<string, unknown> }
   | { ok: false; error: { code: string; message: string; details?: unknown } };
 
-export type SyncState = 'local_only' | 'syncing' | 'synced' | 'conflict' | 'failed';
 export type Confidence = 'Low data' | 'Medium confidence' | 'High confidence' | 'Verified';
 
 export type Team = {
@@ -46,17 +45,6 @@ export type EventSummary = {
   status: 'Fresh' | 'Updating' | 'Stale' | 'Offline';
   teamCount: number;
   division: string;
-};
-
-export type ScoutingNote = {
-  id: string;
-  team: string;
-  match: string;
-  type: 'pit' | 'match' | 'super' | 'post';
-  tags: string[];
-  values: Record<string, string | number | boolean>;
-  syncState: SyncState;
-  updatedAt: string;
 };
 
 export type RobotProject = {

@@ -24,7 +24,7 @@ import {
   ShieldCheck,
   Trophy,
   Upload,
-  WifiOff,
+  X,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -32,23 +32,22 @@ import { CartesianGrid, Line, LineChart as ReLineChart, ResponsiveContainer, Too
 import { MetricCard } from './components/MetricCard';
 import { RobotScene } from './components/RobotScene';
 import { SectionHeader } from './components/SectionHeader';
-import { SyncPill } from './components/StatusPill';
-import { currentEvent, matches, notes, robotProjects, sampleCode, teams } from './data/mockData';
+import { vexFields, vexParts } from './data/vexAssets';
 import { pathService, robotEventsAdapter, robotService } from './services/api';
 import type { LucideIcon } from 'lucide-react';
 import type { Team } from './types';
 
-function PrimaryButton({ children }: { children: React.ReactNode }) {
+function PrimaryButton({ children, onClick, type = 'button' }: { children: React.ReactNode; onClick?: () => void; type?: 'button' | 'submit' }) {
   return (
-    <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-primary to-electric px-4 text-sm font-medium text-white shadow-glow">
+    <button type={type} onClick={onClick} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-primary to-electric px-4 text-sm font-medium text-white shadow-glow">
       {children}
     </button>
   );
 }
 
-function SecondaryButton({ children }: { children: React.ReactNode }) {
+function SecondaryButton({ children, onClick, type = 'button' }: { children: React.ReactNode; onClick?: () => void; type?: 'button' | 'submit' }) {
   return (
-    <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white/5 px-4 text-sm text-slate-200 hover:border-electric/50">
+    <button type={type} onClick={onClick} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white/5 px-4 text-sm text-slate-200 hover:border-electric/50">
       {children}
     </button>
   );
@@ -69,7 +68,7 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
 }
 
 function LiveStatus({ status, detail }: { status: unknown; detail?: unknown }) {
-  const label = typeof status === 'string' ? status : 'Demo';
+  const label = typeof status === 'string' ? status : 'Loading';
   const tone = label === 'Fresh' ? 'text-good border-good/40 bg-good/10' : label === 'Offline' ? 'text-bad border-bad/40 bg-bad/10' : 'text-electric border-electric/40 bg-electric/10';
   return (
     <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${tone}`}>
@@ -187,7 +186,7 @@ export function Pricing() {
         <div className="grid gap-4 md:grid-cols-3">
           {[
             ['Free', '$0', 'One workspace, event scouting, team profiles, compare, manual robot projects.'],
-            ['Team Pro', '$12/mo', 'Unlimited notes, alliance builder, simulation runs, exports, advanced metrics.'],
+            ['Team Pro', '$12/mo', 'Alliance builder, simulation runs, exports, advanced metrics.'],
             ['School/Club', 'Custom', 'Multiple teams, admin dashboards, roster tools, shared scouting templates.'],
           ].map(([name, price, detail]) => (
             <article className="panel p-6" key={name}>
@@ -208,26 +207,29 @@ export function Dashboard() {
     queryFn: () => robotEventsAdapter.searchEvents(),
     refetchInterval: 60_000,
   });
-  const liveEvent = eventsQuery.data?.ok ? eventsQuery.data.data[0] ?? currentEvent : currentEvent;
+  const liveEvents = eventsQuery.data?.ok ? eventsQuery.data.data : [];
+  const liveEvent = liveEvents[0];
   const liveStatus = eventsQuery.data?.ok ? eventsQuery.data.meta?.liveStatus : 'Loading';
 
   return (
     <>
-      <SectionHeader eyebrow="Workspace 8059A" title="Competition dashboard">
+      <SectionHeader eyebrow="Fresh workspace" title="Competition dashboard">
         <div className="flex flex-wrap items-center gap-2">
           <LiveStatus status={liveStatus} detail={eventsQuery.data?.ok ? eventsQuery.data.meta?.source : undefined} />
+          <Link to="/app/scout">
           <PrimaryButton>
             <Plus size={18} /> Scout match
           </PrimaryButton>
+          </Link>
         </div>
       </SectionHeader>
       <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
         <div className="space-y-4">
           <div className="data-grid">
-            <MetricCard label="Current event" value={liveEvent.name} detail={`${liveEvent.teamCount} teams in ${liveEvent.division}`} icon={Trophy} tone="orange" />
-            <MetricCard label="Next match" value="Q24 in 12m" detail="8059A + 24K vs 315R + 1010X" icon={Activity} tone="cyan" />
-            <MetricCard label="Team rank" value="#6" detail="Trend up 3 places since lunch" icon={LineChart} tone="green" />
-            <MetricCard label="Robot status" value="High calibration" detail="Drive and turn physical tests entered" icon={Gauge} tone="blue" />
+            <MetricCard label="Current event" value={liveEvent?.name ?? 'Select an event'} detail={liveEvent ? `${liveEvent.teamCount} teams in ${liveEvent.division}` : 'Live RobotEvents data appears here'} icon={Trophy} tone="orange" />
+            <MetricCard label="Next match" value="Not selected" detail="Choose a live event to load official matches" icon={Activity} tone="cyan" />
+            <MetricCard label="Team rank" value="-" detail="Search a team number to load metrics" icon={LineChart} tone="green" />
+            <MetricCard label="Robot status" value="No code loaded" detail="Upload a VEXcode folder to simulate" icon={Gauge} tone="blue" />
           </div>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {dashboardActions.map(([title, detail, Icon, to]) => (
@@ -244,8 +246,8 @@ export function Dashboard() {
           <div className="mt-4 space-y-3">
             {[
               ['Live data', eventsQuery.data?.ok && eventsQuery.data.meta?.error ? String(eventsQuery.data.meta.error) : 'RobotEvents refreshes every 60 seconds through the server-side token proxy.'],
-              ['Unsynced notes', '3 notes are saved locally and will retry when the network recovers.'],
-              ['Simulation warning', 'Skills Bot needs a 24 in drive test before routes can be marked Verified.'],
+              ['Official CAD', 'VEX part and field source links are listed in the robot workspace and planner.'],
+              ['Simulation', 'Upload source code or draw a path to generate a session-specific timeline.'],
             ].map(([title, detail]) => (
               <div className="rounded-lg border border-line bg-ink/45 p-4" key={title}>
                 <p className="text-sm font-medium text-slate-200">{title}</p>
@@ -260,50 +262,74 @@ export function Dashboard() {
 }
 
 export function ScoutWorkspace() {
-  const { data } = useQuery({ queryKey: ['notes'], queryFn: () => Promise.resolve({ ok: true as const, data: notes }) });
+  const [records, setRecords] = useState<Array<{ id: string; team: string; match: string; tags: string[]; updatedAt: string }>>([]);
+  const [team, setTeam] = useState('');
+  const [match, setMatch] = useState('');
+  const [status, setStatus] = useState('');
+  function saveRecord(event: React.FormEvent) {
+    event.preventDefault();
+    if (!team.trim() || !match.trim()) {
+      setStatus('Enter a team and match before saving.');
+      return;
+    }
+    setRecords((current) => [
+      {
+        id: crypto.randomUUID(),
+        team: team.trim(),
+        match: match.trim(),
+        tags: ['local'],
+        updatedAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      },
+      ...current,
+    ]);
+    setTeam('');
+    setMatch('');
+    setStatus('Saved locally in this browser session.');
+  }
+
   return (
     <>
       <SectionHeader eyebrow="Offline-first" title="Scouting workspace">
-        <SecondaryButton>
-          <WifiOff size={18} /> Offline queue
+        <SecondaryButton onClick={() => setRecords([])}>
+          <X size={18} /> Clear session
         </SecondaryButton>
       </SectionHeader>
       <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-        <section className="panel p-5">
+        <form className="panel p-5" onSubmit={saveRecord}>
           <h2 className="font-semibold">Quick match form</h2>
           <div className="mt-4 grid gap-3">
-            <select className="h-11 rounded-lg border border-line bg-ink px-3 text-sm">
-              <option>Q24 - Team 8059A</option>
-            </select>
+            <input className="h-11 rounded-lg border border-line bg-ink px-3 text-sm" value={team} onChange={(event) => setTeam(event.target.value)} placeholder="Team number" />
+            <input className="h-11 rounded-lg border border-line bg-ink px-3 text-sm" value={match} onChange={(event) => setMatch(event.target.value)} placeholder="Match, e.g. Q12" />
             {['Auton success', 'Defense', 'Disabled', 'Great teamwork'].map((label) => (
               <label key={label} className="flex items-center justify-between rounded-lg border border-line bg-white/5 px-3 py-3 text-sm">
                 {label}
                 <input type="checkbox" className="h-5 w-5 accent-cyan-400" />
               </label>
             ))}
-            <textarea className="min-h-28 rounded-lg border border-line bg-ink p-3 text-sm outline-none" placeholder="One-tap note templates or match details" />
-            <PrimaryButton>
+            <textarea className="min-h-28 rounded-lg border border-line bg-ink p-3 text-sm outline-none" placeholder="Match details" />
+            <PrimaryButton type="submit">
               <Save size={18} /> Save locally
             </PrimaryButton>
+            {status ? <p className="text-sm text-slate-400">{status}</p> : null}
           </div>
-        </section>
+        </form>
         <section className="grid gap-3">
-          {(data?.data ?? []).map((note) => (
-            <article className="panel p-4" key={note.id}>
+          {records.length ? records.map((record) => (
+            <article className="panel p-4" key={record.id}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="font-semibold text-white">{note.team} · {note.match}</p>
-                  <p className="text-sm text-slate-400">{note.type} scouting · updated {note.updatedAt}</p>
+                  <p className="font-semibold text-white">{record.team} · {record.match}</p>
+                  <p className="text-sm text-slate-400">Local scouting record · updated {record.updatedAt}</p>
                 </div>
-                <SyncPill state={note.syncState} />
+                <span className="rounded-full border border-line px-2 py-1 text-xs text-slate-400">local</span>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                {note.tags.map((tag) => (
+                {record.tags.map((tag) => (
                   <span className="rounded-full border border-line bg-white/5 px-2 py-1 text-xs text-slate-300" key={tag}>{tag}</span>
                 ))}
               </div>
             </article>
-          ))}
+          )) : <EmptyState title="No scouting records yet" detail="Use the form to create this session's first record. RoboLab starts clean without preset teams or records." />}
         </section>
       </div>
     </>
@@ -318,18 +344,19 @@ export function EventCenter() {
     queryFn: () => robotEventsAdapter.searchEvents(),
     refetchInterval: 120_000,
   });
-  const selectedEvent = eventQuery.data?.ok ? eventQuery.data.data.find((event) => event.id === eventId) ?? eventQuery.data.data[0] ?? currentEvent : currentEvent;
+  const selectedEvent = eventQuery.data?.ok ? eventQuery.data.data.find((event) => event.id === eventId) ?? eventQuery.data.data[0] : undefined;
   const matchesQuery = useQuery({
-    queryKey: ['robotevents', 'matches', selectedEvent.id],
-    queryFn: () => robotEventsAdapter.getEventMatches(selectedEvent.id),
+    queryKey: ['robotevents', 'matches', selectedEvent?.id],
+    queryFn: () => robotEventsAdapter.getEventMatches(selectedEvent?.id),
+    enabled: Boolean(selectedEvent),
     refetchInterval: 30_000,
   });
-  const eventMatches = matchesQuery.data?.ok ? matchesQuery.data.data : matches;
+  const eventMatches = matchesQuery.data?.ok ? matchesQuery.data.data : [];
   const liveStatus = matchesQuery.data?.ok ? matchesQuery.data.meta?.liveStatus : 'Loading';
 
   return (
     <>
-      <SectionHeader eyebrow={selectedEvent.location} title={selectedEvent.name}>
+      <SectionHeader eyebrow={selectedEvent?.location ?? 'Live event'} title={selectedEvent?.name ?? 'Select an event'}>
         <div className="flex flex-wrap items-center gap-2">
           <LiveStatus status={liveStatus} detail={matchesQuery.data?.ok ? matchesQuery.data.meta?.source : undefined} />
           <SecondaryButton>
@@ -343,7 +370,7 @@ export function EventCenter() {
             <h2 className="font-semibold">Live match center</h2>
           </div>
           <div className="divide-y divide-line">
-            {eventMatches.map((match) => (
+            {eventMatches.length ? eventMatches.map((match) => (
               <article className="grid gap-4 p-4 md:grid-cols-[120px_1fr_1fr_180px]" key={match.id}>
                 <div>
                   <p className="text-lg font-semibold">{match.number}</p>
@@ -362,18 +389,18 @@ export function EventCenter() {
                   <p className="text-xs text-slate-500">{match.prediction.confidence}</p>
                 </div>
               </article>
-            ))}
+            )) : <EmptyState title="No matches loaded" detail="Open a live event from Lookup to load official RobotEvents matches." />}
           </div>
         </section>
         <aside className="panel p-5">
           <h2 className="font-semibold">Live event status</h2>
           <p className="mt-3 text-sm leading-6 text-slate-400">
             Schedule and matches refresh every 30 seconds when RobotEvents returns JSON. If the API redirects or rate-limits,
-            RoboLab keeps the cached/demo view and marks the feed stale instead of overlapping or breaking the page.
+            RoboLab keeps the current view stable and marks the feed stale instead of overlapping or breaking the page.
           </p>
           <div className="mt-4 rounded-lg border border-line bg-white/5 p-3 text-sm">
             <p className="font-medium">Event ID</p>
-            <p className="mt-1 text-slate-400">{selectedEvent.id}</p>
+            <p className="mt-1 text-slate-400">{selectedEvent?.id ?? 'Not selected'}</p>
           </div>
         </aside>
       </div>
@@ -386,27 +413,33 @@ function score(team: Team) {
 }
 
 export function TeamProfile() {
-  const team = teams[0];
-  const chart = [
-    { event: 'Week 1', score: 68 },
-    { event: 'Week 2', score: 74 },
-    { event: 'Week 3', score: 82 },
-    { event: 'Now', score: team.avgScore },
-  ];
+  const { number } = useParams();
+  const teamQuery = useQuery({
+    queryKey: ['team-profile', number],
+    queryFn: () => robotEventsAdapter.searchTeams(number ?? ''),
+    enabled: Boolean(number),
+  });
+  const team = teamQuery.data?.ok ? teamQuery.data.data[0] : undefined;
+  const chart = team ? [
+    { event: 'Loaded', score: team.avgScore },
+    { event: 'Current', score: team.avgScore },
+  ] : [];
   return (
     <>
-      <SectionHeader eyebrow={team.confidence} title={`${team.number} · ${team.name}`}>
-        <PrimaryButton>
-          <Plus size={18} /> Add note
-        </PrimaryButton>
+      <SectionHeader eyebrow={team?.confidence ?? 'Live lookup'} title={team ? `${team.number} · ${team.name}` : 'Team profile'}>
+        <Link to="/app/alliance">
+          <PrimaryButton>
+            <Search size={18} /> Search teams
+          </PrimaryButton>
+        </Link>
       </SectionHeader>
-      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      {team ? <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
         <section className="panel p-5">
           <p className="text-slate-400">{team.organization} · {team.region}</p>
           <div className="mt-5 data-grid">
             <MetricCard label="Win rate" value={`${Math.round(team.winRate * 100)}%`} detail="Recent official and scouting blend" icon={Trophy} />
             <MetricCard label="Avg score" value={`${team.avgScore}`} detail="Estimated contribution model v1" icon={Gauge} tone="green" />
-            <MetricCard label="Auton signal" value={`${team.autonSignal}`} detail="Programming skills plus notes" icon={BrainCircuit} tone="orange" />
+            <MetricCard label="Auton signal" value={`${team.autonSignal}`} detail="Programming skills plus live scouting records" icon={BrainCircuit} tone="orange" />
           </div>
           <div className="mt-5 h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -424,28 +457,38 @@ export function TeamProfile() {
           <h2 className="font-semibold">AI-assisted summary</h2>
           <p className="mt-3 text-sm leading-6 text-slate-400">
             Recommended as a high-trust partner because they combine consistent driver-control scoring, low mechanical risk,
-            and scout-confirmed autonomous reliability. Sources: match history, pit note, event ranking trend.
+            and scout-confirmed autonomous reliability. Sources: live match history, scouting records, event ranking trend.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             {team.tags.map((tag) => <span className="rounded-full border border-line px-2 py-1 text-xs" key={tag}>{tag}</span>)}
           </div>
         </aside>
-      </div>
+      </div> : <EmptyState title="No team loaded" detail="Search from Lookup or open a live team profile. Fresh workspaces do not show preset team profiles." />}
     </>
   );
 }
 
 export function CompareTeams() {
+  const [query, setQuery] = useState('');
+  const teamsQuery = useQuery({
+    queryKey: ['compare-teams', query],
+    queryFn: () => robotEventsAdapter.searchTeams(query),
+    enabled: query.trim().length > 1,
+  });
+  const comparedTeams = teamsQuery.data?.ok ? teamsQuery.data.data : [];
   return (
     <>
       <SectionHeader eyebrow="Explainable metrics" title="Team compare">
-        <SecondaryButton>
-          <Search size={18} /> Add team
-        </SecondaryButton>
+        <div className="lookup-search flex gap-2">
+          <input className="h-11 min-w-0 rounded-lg border border-line px-3 text-sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search team number" />
+          <SecondaryButton>
+            <Search size={18} /> Search
+          </SecondaryButton>
+        </div>
       </SectionHeader>
       <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
         <section className="panel overflow-x-auto p-4">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          {comparedTeams.length ? <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
               <tr>
                 <th className="p-3">Team</th>
@@ -455,7 +498,7 @@ export function CompareTeams() {
               </tr>
             </thead>
             <tbody>
-              {teams.map((team) => (
+              {comparedTeams.map((team) => (
                 <tr className="border-t border-line" key={team.number}>
                   <td className="p-3 font-medium text-white">{team.number}<p className="text-xs font-normal text-slate-500">{team.confidence}</p></td>
                   <td className="p-3">{team.avgScore}</td>
@@ -468,7 +511,7 @@ export function CompareTeams() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table> : <EmptyState title="Search teams to compare" detail="Enter a VEX team number to load live RobotEvents team data. No preset ranking list is shown in a fresh workspace." />}
         </section>
         <aside className="panel p-5">
           <h2 className="font-semibold">Why this matters</h2>
@@ -484,7 +527,7 @@ export function CompareTeams() {
 
 export function AllianceBuilder() {
   const [teamQuery, setTeamQuery] = useState('');
-  const ranked = useMemo(() => [...teams].sort((a, b) => score(b) - score(a)), []);
+  const [pickList, setPickList] = useState<Team[]>([]);
   const eventsQuery = useQuery({
     queryKey: ['robotevents', 'lookup-events'],
     queryFn: () => robotEventsAdapter.searchEvents(),
@@ -496,8 +539,8 @@ export function AllianceBuilder() {
     enabled: teamQuery.trim().length > 1,
     staleTime: 60_000,
   });
-  const lookupTeams = teamsQuery.data?.ok && teamsQuery.data.data.length ? teamsQuery.data.data : ranked;
-  const liveEvents = eventsQuery.data?.ok ? eventsQuery.data.data : [currentEvent];
+  const lookupTeams = teamsQuery.data?.ok ? teamsQuery.data.data : [];
+  const liveEvents = eventsQuery.data?.ok ? eventsQuery.data.data : [];
 
   return (
     <>
@@ -519,7 +562,7 @@ export function AllianceBuilder() {
                 className="h-11 min-w-0 flex-1 rounded-lg border border-line px-3 text-sm"
                 value={teamQuery}
                 onChange={(event) => setTeamQuery(event.target.value)}
-                placeholder="Search a team number, e.g. 8059A"
+                placeholder="Search a team number"
               />
               <SecondaryButton>
                 <Search size={18} /> Search
@@ -530,7 +573,7 @@ export function AllianceBuilder() {
 
           <div className="panel p-4">
             <h2 className="font-semibold">Compare and partner ranking</h2>
-            <table className="desktop-table mt-3 w-full min-w-[720px] text-left text-sm">
+            {lookupTeams.length ? <table className="desktop-table mt-3 w-full min-w-[720px] text-left text-sm">
               <thead className="text-xs uppercase text-slate-500">
                 <tr>
                   <th className="p-3">Team</th>
@@ -550,12 +593,15 @@ export function AllianceBuilder() {
                     <td className="p-3">{team.winRate ? `${Math.round(team.winRate * 100)}%` : '-'}</td>
                     <td className="p-3">{team.consistency || '-'}</td>
                     <td className="p-3">{team.autonSignal || '-'}</td>
-                    <td className="p-3">{team.skills || '-'}</td>
-                    <td className="p-3 text-electric">{score(team)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  <td className="p-3">{team.skills || '-'}</td>
+                  <td className="p-3 text-electric">{score(team)}</td>
+                  <td className="p-3">
+                    <button className="rounded-lg border border-line px-3 py-2 text-xs" onClick={() => setPickList((current) => current.some((item) => item.number === team.number) ? current : [...current, team])}>Add</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            </table> : <EmptyState title="Search a team to begin" detail="This workspace starts empty. Live RobotEvents team results appear here after you search." />}
             <div className="mobile-team-list mt-3 space-y-2">
               {lookupTeams.map((team) => (
                 <article className="rounded-lg border border-line bg-white/5 p-3" key={team.number}>
@@ -577,29 +623,29 @@ export function AllianceBuilder() {
           </div>
 
           <div className="grid gap-3">
-            {ranked.slice(0, 5).map((team, index) => (
+            {pickList.length ? pickList.map((team, index) => (
               <article className="panel p-4" key={team.number}>
                 <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-lg font-semibold">#{index + 1} {team.number} · {team.name}</p>
-                    <p className="text-sm text-slate-400">Recommended because: {team.tags.slice(0, 2).join(', ')}</p>
+                    <p className="text-sm text-slate-400">Added to this session's pick list.</p>
                   </div>
                   <p className="rounded-full border border-electric/40 px-3 py-1 text-sm font-semibold text-electric">Fit {score(team)}</p>
                 </div>
               </article>
-            ))}
+            )) : <EmptyState title="Pick list is empty" detail="Search live teams and add candidates during alliance selection." />}
           </div>
         </section>
         <aside className="space-y-4">
           <section className="panel p-5">
             <h2 className="font-semibold">Live events</h2>
             <div className="mt-3 space-y-2">
-              {liveEvents.slice(0, 5).map((event) => (
+              {liveEvents.length ? liveEvents.slice(0, 5).map((event) => (
                 <Link className="block rounded-lg border border-line bg-white/5 p-3" to={`/app/events/${event.id}`} key={event.id}>
                   <p className="text-sm font-medium">{event.name}</p>
                   <p className="mt-1 text-xs text-slate-500">{event.location} · {event.date}</p>
                 </Link>
-              ))}
+              )) : <p className="text-sm leading-6 text-slate-400">No live event data loaded yet.</p>}
             </div>
           </section>
           <section className="panel p-5">
@@ -619,10 +665,10 @@ export function AllianceBuilder() {
           </section>
           <section className="panel p-5">
             <h2 className="font-semibold">Pick list tiers</h2>
-            {['A', 'B', 'C', 'D'].map((tier) => (
+            {['A', 'B', 'C', 'D'].map((tier, index) => (
               <div className="mt-3 rounded-lg border border-line bg-ink/45 p-3" key={tier}>
                 <p className="text-sm font-medium">Tier {tier}</p>
-                <p className="text-xs text-slate-500">Drag teams here during alliance selection.</p>
+                <p className="text-xs text-slate-500">{pickList[index]?.number ?? 'Empty'}</p>
               </div>
             ))}
           </section>
@@ -634,12 +680,12 @@ export function AllianceBuilder() {
 
 export function RobotWorkspace({ simMode = false }: { simMode?: boolean }) {
   const { data } = useQuery({ queryKey: ['robots'], queryFn: robotService.listProjects });
-  const robots = data?.ok ? data.data : robotProjects;
+  const robots = data?.ok ? data.data : [];
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ name: string; path: string; size: number; type: string; content?: string }>>([]);
   const codeFiles = uploadedFiles.filter((file) => /\.(cpp|h|hpp|py|txt|json|v5code)$/i.test(file.name));
-  const codePreview = codeFiles.find((file) => file.content)?.content ?? sampleCode;
+  const codePreview = codeFiles.find((file) => file.content)?.content ?? '';
   const detectedDevices = useMemo(() => {
     const names = codeFiles.map((file) => `${file.name} ${file.content ?? ''}`.toLowerCase()).join(' ');
     return [
@@ -705,7 +751,7 @@ export function RobotWorkspace({ simMode = false }: { simMode?: boolean }) {
               </div>
             ) : null}
           </article>
-          {robots.map((robot) => (
+          {robots.length ? robots.map((robot) => (
             <article className="panel p-4" key={robot.id}>
               <p className="font-semibold text-white">{robot.name}</p>
               <p className="mt-1 text-sm text-slate-400">{robot.season} · {robot.status}</p>
@@ -716,7 +762,23 @@ export function RobotWorkspace({ simMode = false }: { simMode?: boolean }) {
                 <span className="rounded-lg border border-line bg-white/5 p-2">{robot.dimensions.calibrationScore}</span>
               </div>
             </article>
-          ))}
+          )) : (
+            <article className="panel p-4">
+              <p className="font-semibold text-white">No robot project loaded</p>
+              <p className="mt-1 text-sm leading-5 text-slate-400">Upload a VEXcode folder to start a session. RoboLab does not show fake robot projects in a fresh workspace.</p>
+            </article>
+          )}
+          <article className="panel p-4">
+            <p className="font-semibold text-white">Official VEX CAD sources</p>
+            <div className="mt-3 space-y-2">
+              {vexParts.map((part) => (
+                <a className="block rounded-lg border border-line bg-white/5 p-3 text-sm" href={part.cadUrl} target="_blank" rel="noreferrer" key={part.sku}>
+                  <span className="font-medium">{part.name}</span>
+                  <span className="mt-1 block text-xs text-slate-500">{part.sku} · {part.detail}</span>
+                </a>
+              ))}
+            </div>
+          </article>
         </section>
         <section className="space-y-4">
           <RobotScene />
@@ -732,12 +794,12 @@ export function RobotWorkspace({ simMode = false }: { simMode?: boolean }) {
                   </div>
                 ))}
               </div>
-              <pre className="mt-4 max-h-72 overflow-auto rounded-lg border border-line bg-ink p-4 text-xs leading-5 text-slate-300">{codePreview}</pre>
+              {codePreview ? <pre className="mt-4 max-h-72 overflow-auto rounded-lg border border-line bg-ink p-4 text-xs leading-5 text-slate-300">{codePreview}</pre> : <EmptyState title="No code imported" detail="Upload a VEXcode project to preview source and map motors from the actual files." />}
             </div>
             <div className="panel p-4">
               <h2 className="font-semibold">Simulation timeline</h2>
               <div className="mt-4 space-y-3">
-                {['driveFor 24 in', 'turnFor 38 deg', 'driveFor 18 in', 'armMotor 220 deg'].map((cmd, index) => (
+                {(codePreview ? ['Parse drivetrain commands', 'Estimate robot poses', 'Review warnings', 'Export path patch'] : ['Upload code to create a timeline']).map((cmd, index) => (
                   <div className="flex items-center gap-3 rounded-lg border border-line bg-white/5 p-3 text-sm" key={cmd}>
                     <span className="grid h-7 w-7 place-items-center rounded bg-electric/10 text-electric">{index + 1}</span>
                     {cmd}
@@ -752,16 +814,40 @@ export function RobotWorkspace({ simMode = false }: { simMode?: boolean }) {
   );
 }
 
-const fieldPresets = [
-  { id: 'high-stakes', season: '2024-25', name: 'High Stakes', objects: 'rings, mobile goals, wall stakes', primary: '#ff3b30', secondary: '#007aff' },
-  { id: 'over-under', season: '2023-24', name: 'Over Under', objects: 'triballs and match-load zones', primary: '#ff9500', secondary: '#34c759' },
-  { id: 'spin-up', season: '2022-23', name: 'Spin Up', objects: 'discs, rollers, and expansion zones', primary: '#ffcc00', secondary: '#007aff' },
-  { id: 'tipping-point', season: '2021-22', name: 'Tipping Point', objects: 'rings, platforms, and mobile goals', primary: '#af52de', secondary: '#ff3b30' },
-] as const;
-
-type FieldPreset = (typeof fieldPresets)[number];
+const fieldPresets = vexFields;
+type FieldPreset = (typeof vexFields)[number];
 
 function FieldObjects({ field }: { field: FieldPreset }) {
+  if (field.id === 'override') {
+    return (
+      <>
+        <rect x="118" y="96" width="110" height="328" rx="12" fill="rgba(0,122,255,0.14)" stroke="#007aff" strokeWidth="3" />
+        <rect x="472" y="96" width="110" height="328" rx="12" fill="rgba(255,59,48,0.14)" stroke="#ff3b30" strokeWidth="3" />
+        {[140, 210, 280, 350].map((cy) => (
+          <g key={cy}>
+            <rect x="314" y={cy - 18} width="72" height="36" rx="6" fill="#2c2c2e" />
+            <circle cx="350" cy={cy} r="13" fill="#ffcc00" stroke="#1c1c1e" strokeWidth="3" />
+          </g>
+        ))}
+        <path d="M244 74H456M244 446H456" stroke="#1c1c1e" strokeWidth="10" strokeLinecap="round" />
+      </>
+    );
+  }
+
+  if (field.id === 'push-back') {
+    return (
+      <>
+        {[
+          [150, 132, '#007aff'], [226, 194, '#007aff'], [474, 326, '#ff3b30'], [552, 388, '#ff3b30'], [350, 260, '#8e8e93'],
+        ].map(([cx, cy, color]) => (
+          <rect key={`${cx}-${cy}`} x={(cx as number) - 25} y={(cy as number) - 25} width="50" height="50" rx="8" fill={color as string} stroke="#1c1c1e" strokeWidth="4" />
+        ))}
+        <rect x="76" y="222" width="150" height="76" rx="10" fill="rgba(0,122,255,0.16)" stroke="#007aff" strokeWidth="3" />
+        <rect x="474" y="222" width="150" height="76" rx="10" fill="rgba(255,59,48,0.16)" stroke="#ff3b30" strokeWidth="3" />
+      </>
+    );
+  }
+
   if (field.id === 'over-under') {
     return (
       <>
@@ -837,15 +923,6 @@ function VrcField({ field }: { field: FieldPreset }) {
       <line x1="350" y1="38" x2="350" y2="482" stroke="rgba(60,60,67,0.32)" strokeWidth="3" strokeDasharray="10 9" />
       <line x1="38" y1="260" x2="662" y2="260" stroke="rgba(60,60,67,0.22)" strokeWidth="2" />
       <FieldObjects field={field} />
-      <path d="M98 412 C 168 330, 250 304, 328 260 S 496 172, 600 108" fill="none" stroke="#ff3b30" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M98 412 C 168 330, 250 304, 328 260 S 496 172, 600 108" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeDasharray="9 12" />
-      <g transform="translate(76 385) rotate(-18)">
-        <rect x="0" y="0" width="64" height="48" rx="7" fill="#2c2c2e" stroke="#ff3b30" strokeWidth="4" />
-        <rect x="8" y="8" width="48" height="14" rx="3" fill="#0a84ff" />
-        <circle cx="12" cy="52" r="8" fill="#1c1c1e" />
-        <circle cx="52" cy="52" r="8" fill="#1c1c1e" />
-      </g>
-      <circle cx="600" cy="108" r="14" fill="#34c759" stroke="#1c1c1e" strokeWidth="3" />
       <text x="54" y="68" className="vex-field-label">BLUE START</text>
       <text x="506" y="462" className="vex-field-label">RED ZONE</text>
     </svg>
@@ -855,11 +932,17 @@ function VrcField({ field }: { field: FieldPreset }) {
 export function PathPlanner() {
   const [accepted, setAccepted] = useState(false);
   const [patch, setPatch] = useState('');
-  const [fieldId, setFieldId] = useState<FieldPreset['id']>('high-stakes');
+  const [fieldId, setFieldId] = useState<FieldPreset['id']>('override');
+  const [pathPoints, setPathPoints] = useState<Array<{ x: number; y: number }>>([]);
   const field = fieldPresets.find((preset) => preset.id === fieldId) ?? fieldPresets[0];
   async function optimize() {
-    const response = await pathService.optimizePath([]);
+    const response = await pathService.optimizePath(pathPoints);
     if (response.ok) setPatch(response.data.patch.newText);
+  }
+  function addPathPoint(event: React.MouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setPathPoints((current) => [...current, { x: Math.round(((event.clientX - rect.left) / rect.width) * 700), y: Math.round(((event.clientY - rect.top) / rect.height) * 520) }]);
+    setAccepted(false);
   }
   return (
     <>
@@ -877,15 +960,25 @@ export function PathPlanner() {
       </SectionHeader>
       <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
         <section className="panel p-4">
-          <div className="vrc-field relative h-[620px] overflow-hidden rounded-lg border border-line bg-[#f8f8fb]">
+          <div className="vrc-field relative h-[620px] overflow-hidden rounded-lg border border-line bg-[#f8f8fb]" onClick={addPathPoint}>
             <VrcField field={field} />
+            <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 700 520">
+              {pathPoints.length > 1 ? <polyline points={pathPoints.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#ff3b30" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" /> : null}
+              {pathPoints.map((point, index) => (
+                <g key={`${point.x}-${point.y}-${index}`}>
+                  <circle cx={point.x} cy={point.y} r="13" fill={index === 0 ? '#007aff' : '#34c759'} stroke="#1c1c1e" strokeWidth="3" />
+                  <text x={point.x + 16} y={point.y + 5} className="vex-field-label">{index + 1}</text>
+                </g>
+              ))}
+            </svg>
             <div className="absolute right-4 top-4 rounded-lg border border-line bg-white/90 px-3 py-2 text-sm shadow-sm">
               <p className="font-semibold">{field.name}</p>
               <p className="text-xs text-slate-500">{field.season} · {field.objects}</p>
             </div>
             <div className="absolute bottom-4 left-4 flex gap-2">
-              <button onClick={optimize} className="h-11 rounded-lg bg-primary px-4 text-sm font-medium">Optimize</button>
-              <button className="h-11 rounded-lg border border-line bg-ink/80 px-4 text-sm">Undo</button>
+              <button onClick={(event) => { event.stopPropagation(); void optimize(); }} className="h-11 rounded-lg bg-primary px-4 text-sm font-medium">Optimize</button>
+              <button onClick={(event) => { event.stopPropagation(); setPathPoints((current) => current.slice(0, -1)); }} className="h-11 rounded-lg border border-line bg-ink/80 px-4 text-sm">Undo</button>
+              <a onClick={(event) => event.stopPropagation()} className="grid h-11 place-items-center rounded-lg border border-line bg-white/90 px-4 text-sm" href={field.cadUrl} target="_blank" rel="noreferrer">Official CAD</a>
             </div>
           </div>
         </section>
@@ -909,27 +1002,38 @@ export function PathPlanner() {
 }
 
 export function DebugAssistant() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [symptom, setSymptom] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const [analysis, setAnalysis] = useState<Array<[string, string]>>([]);
+  function analyze() {
+    const text = symptom.toLowerCase();
+    const results: Array<[string, string]> = [];
+    if (text.includes('turn') || text.includes('drift')) results.push(['Drivetrain calibration', 'Verify wheel diameter, track width, gear ratio, and inertial calibration before changing turn constants.']);
+    if (text.includes('motor') || text.includes('port')) results.push(['Motor configuration', 'Check duplicate V5 Smart Port declarations and reversed motor flags in robot-config files.']);
+    if (text.includes('lift') || text.includes('stall')) results.push(['Mechanical load', 'Inspect gear ratio, friction, current draw, and hard stops before increasing motor power.']);
+    if (!results.length) results.push(['Ready for inspection', 'Add a symptom or attach code so RoboLab can produce a targeted VEX checklist.']);
+    setAnalysis(results);
+  }
   return (
     <>
       <SectionHeader eyebrow="Rules-first assistant" title="VEX troubleshooting">
-        <SecondaryButton>
+        <SecondaryButton onClick={() => fileInputRef.current?.click()}>
           <Upload size={18} /> Attach code
         </SecondaryButton>
+        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => setAttachedFiles(Array.from(event.target.files ?? []).map((file) => file.name))} />
       </SectionHeader>
       <div className="grid gap-4 lg:grid-cols-[420px_1fr]">
         <section className="panel p-5">
-          <textarea className="min-h-48 w-full rounded-lg border border-line bg-ink p-3 text-sm outline-none" placeholder="Describe the symptom: one side reversed, lift stalls, compile error..." />
-          <PrimaryButton>
+          <textarea value={symptom} onChange={(event) => setSymptom(event.target.value)} className="min-h-48 w-full rounded-lg border border-line bg-ink p-3 text-sm outline-none" placeholder="Describe the symptom: one side reversed, lift stalls, compile error..." />
+          {attachedFiles.length ? <p className="my-3 text-sm text-slate-400">{attachedFiles.length} file(s) attached: {attachedFiles.join(', ')}</p> : null}
+          <PrimaryButton onClick={analyze}>
             <BrainCircuit size={18} /> Analyze
           </PrimaryButton>
         </section>
         <section className="panel p-5">
-          <h2 className="font-semibold">Likely causes</h2>
-          {[
-            ['Motor reversed or duplicate port', 'Check drivetrain port mapping and reversed toggles before changing code.'],
-            ['Inertial not calibrated', 'Wait for calibration before autonomous turns or use a timeout fallback.'],
-            ['Mechanical binding', 'Lift stall with high current often means friction or a loose set screw.'],
-          ].map(([title, detail]) => (
+          <h2 className="font-semibold">Inspection results</h2>
+          {(analysis.length ? analysis : [['No analysis yet', 'Describe a problem or attach code, then run Analyze.']]).map(([title, detail]) => (
             <div className="mt-3 rounded-lg border border-line bg-white/5 p-4" key={title}>
               <p className="font-medium">{title}</p>
               <p className="mt-2 text-sm leading-5 text-slate-400">{detail}</p>

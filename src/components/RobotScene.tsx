@@ -1,19 +1,33 @@
 import { Html, OrbitControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 
-function Rail({ position, rotation, length = 3.1 }: { position: [number, number, number]; rotation?: [number, number, number]; length?: number }) {
-  const holes = Array.from({ length: 12 }, (_, index) => -length / 2 + 0.18 + index * ((length - 0.36) / 11));
+function Rail({ position, rotation, length = 3.5 }: { position: [number, number, number]; rotation?: [number, number, number]; length?: number }) {
+  const holes = Array.from({ length: 16 }, (_, index) => -length / 2 + 0.16 + index * ((length - 0.32) / 15));
   return (
     <group position={position} rotation={rotation}>
       <mesh>
-        <boxGeometry args={[length, 0.12, 0.18]} />
-        <meshStandardMaterial color="#b8c0cc" metalness={0.75} roughness={0.22} />
+        <boxGeometry args={[length, 0.16, 0.42]} />
+        <meshStandardMaterial color="#b9c0c9" metalness={0.85} roughness={0.19} />
+      </mesh>
+      <mesh position={[0, 0.17, -0.16]}>
+        <boxGeometry args={[length, 0.18, 0.08]} />
+        <meshStandardMaterial color="#8f99a8" metalness={0.8} roughness={0.22} />
+      </mesh>
+      <mesh position={[0, 0.17, 0.16]}>
+        <boxGeometry args={[length, 0.18, 0.08]} />
+        <meshStandardMaterial color="#8f99a8" metalness={0.8} roughness={0.22} />
       </mesh>
       {holes.map((x) => (
-        <mesh key={x} position={[x, 0.066, 0.092]} rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.045, 0.045, 0.012, 18]} />
-          <meshStandardMaterial color="#252a32" metalness={0.2} roughness={0.45} />
-        </mesh>
+        <group key={x}>
+          <mesh position={[x, 0.255, -0.19]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.04, 0.04, 0.018, 18]} />
+            <meshStandardMaterial color="#252a32" metalness={0.2} roughness={0.45} />
+          </mesh>
+          <mesh position={[x, 0.255, 0.19]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.04, 0.04, 0.018, 18]} />
+            <meshStandardMaterial color="#252a32" metalness={0.2} roughness={0.45} />
+          </mesh>
+        </group>
       ))}
     </group>
   );
@@ -23,11 +37,17 @@ function Wheel({ x, z }: { x: number; z: number }) {
   return (
     <group position={[x, -0.28, z]} rotation={[Math.PI / 2, 0, 0]}>
       <mesh>
-        <cylinderGeometry args={[0.34, 0.34, 0.24, 48]} />
+        <cylinderGeometry args={[0.36, 0.36, 0.26, 64]} />
         <meshStandardMaterial color="#1f2933" roughness={0.55} />
       </mesh>
-      <mesh>
-        <torusGeometry args={[0.27, 0.028, 12, 36]} />
+      {Array.from({ length: 10 }, (_, index) => (
+        <mesh key={index} rotation={[0, 0, (Math.PI * 2 * index) / 10]}>
+          <boxGeometry args={[0.08, 0.62, 0.28]} />
+          <meshStandardMaterial color="#111827" roughness={0.65} />
+        </mesh>
+      ))}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.24, 0.03, 12, 48]} />
         <meshStandardMaterial color="#f8fafc" metalness={0.45} roughness={0.3} />
       </mesh>
       <mesh>
@@ -38,20 +58,21 @@ function Wheel({ x, z }: { x: number; z: number }) {
   );
 }
 
-function Motor({ position, label }: { position: [number, number, number]; label: string }) {
+function Motor({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
       <mesh>
-        <boxGeometry args={[0.46, 0.34, 0.34]} />
-        <meshStandardMaterial color="#2f3540" metalness={0.25} roughness={0.42} />
+        <boxGeometry args={[0.62, 0.4, 0.44]} />
+        <meshStandardMaterial color="#333842" metalness={0.25} roughness={0.38} />
       </mesh>
-      <mesh position={[0.24, 0, 0]}>
-        <cylinderGeometry args={[0.09, 0.09, 0.08, 24]} />
+      <mesh position={[0.32, 0, 0]}>
+        <cylinderGeometry args={[0.12, 0.12, 0.08, 28]} />
         <meshStandardMaterial color="#ef4444" />
       </mesh>
-      <Html position={[0, 0.34, 0]} className="pointer-events-none">
-        <span className="robot-label">{label}</span>
-      </Html>
+      <mesh position={[-0.12, 0.205, 0]}>
+        <boxGeometry args={[0.2, 0.014, 0.26]} />
+        <meshStandardMaterial color="#cbd5e1" metalness={0.6} roughness={0.25} />
+      </mesh>
     </group>
   );
 }
@@ -60,15 +81,15 @@ function V5Brain() {
   return (
     <group position={[0, 0.22, -0.2]}>
       <mesh>
-        <boxGeometry args={[1.05, 0.38, 0.72]} />
+        <boxGeometry args={[1.35, 0.44, 0.96]} />
         <meshStandardMaterial color="#171717" metalness={0.15} roughness={0.45} />
       </mesh>
       <mesh position={[0, 0.205, 0.02]}>
-        <boxGeometry args={[0.78, 0.02, 0.42]} />
-        <meshStandardMaterial color="#22d3ee" emissive="#0e7490" emissiveIntensity={0.35} />
+        <boxGeometry args={[0.92, 0.022, 0.52]} />
+        <meshStandardMaterial color="#1d9bf0" emissive="#0e7490" emissiveIntensity={0.28} />
       </mesh>
       <Html position={[0, 0.48, 0]} className="pointer-events-none">
-        <span className="robot-label brain">V5 Brain</span>
+        <span className="robot-label brain">V5 Robot Brain 276-4810</span>
       </Html>
     </group>
   );
@@ -85,17 +106,18 @@ function RobotModel() {
       <Rail position={[0, 0.32, 0.92]} length={2.6} />
 
       {[-1.15, 1.15].map((x) => [-0.9, 0.9].map((z) => <Wheel key={`${x}-${z}`} x={x} z={z} />))}
-      <Motor position={[-1.05, 0.2, -0.58]} label="leftFront 11W" />
-      <Motor position={[1.05, 0.2, 0.58]} label="rightBack 11W" />
+      <Motor position={[-1.05, 0.2, -0.58]} />
+      <Motor position={[1.05, 0.2, 0.58]} />
       <V5Brain />
 
-      <mesh position={[-0.05, 0.68, 0.72]}>
-        <boxGeometry args={[0.78, 0.24, 0.42]} />
-        <meshStandardMaterial color="#dc2626" roughness={0.32} />
+      <mesh position={[-0.1, 0.72, 0.82]}>
+        <boxGeometry args={[1.5, 0.28, 0.52]} />
+        <meshStandardMaterial color="#b91c1c" roughness={0.32} />
       </mesh>
-      <Html position={[-0.05, 1.02, 0.72]} className="pointer-events-none">
-        <span className="robot-label">V5 Battery</span>
-      </Html>
+      <mesh position={[-0.62, 0.87, 0.82]}>
+        <boxGeometry args={[0.18, 0.02, 0.28]} />
+        <meshStandardMaterial color="#f8fafc" emissive="#e5e7eb" emissiveIntensity={0.2} />
+      </mesh>
 
       <group position={[0.78, 0.78, 0]} rotation={[0, 0, -0.62]}>
         <Rail position={[0, 0, -0.12]} length={1.8} />
@@ -105,15 +127,12 @@ function RobotModel() {
         <Rail position={[0, 0, -0.12]} length={1.25} />
         <Rail position={[0, 0, 0.12]} length={1.25} />
       </group>
-      <Motor position={[0.72, 0.56, -0.48]} label="armMotor" />
+      <Motor position={[0.72, 0.56, -0.48]} />
 
       <mesh position={[-1.5, 0.22, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.16, 0.16, 1.55, 32]} />
         <meshStandardMaterial color="#22c55e" roughness={0.45} />
       </mesh>
-      <Html position={[-1.55, 0.58, 0]} className="pointer-events-none">
-        <span className="robot-label intake">intake roller</span>
-      </Html>
     </group>
   );
 }
@@ -121,7 +140,7 @@ function RobotModel() {
 export function RobotScene() {
   return (
     <div className="robot-scene">
-      <Canvas camera={{ position: [4.2, 3.1, 4.8], fov: 38 }}>
+      <Canvas camera={{ position: [4.6, 3.2, 4.9], fov: 37 }}>
         <color attach="background" args={['#f6f7fb']} />
         <ambientLight intensity={0.7} />
         <directionalLight position={[4, 7, 5]} intensity={2.2} />

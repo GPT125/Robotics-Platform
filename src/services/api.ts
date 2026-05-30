@@ -1,5 +1,4 @@
-import { currentEvent, matches, notes, robotProjects, teams } from '../data/mockData';
-import type { ApiResponse, CodePatch, EventSummary, Match, RobotProject, ScoutingNote, Team } from '../types';
+import type { ApiResponse, CodePatch, EventSummary, Match, RobotProject, Team } from '../types';
 
 const delay = (ms = 260) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -9,6 +8,16 @@ export async function apiOk<T>(data: T, meta?: Record<string, unknown>): Promise
 }
 
 type RobotEventsEntity = Record<string, unknown>;
+
+const emptyEventFallback: EventSummary = {
+  id: '',
+  name: '',
+  location: '',
+  date: '',
+  status: 'Offline',
+  teamCount: 0,
+  division: '',
+};
 
 function asRecord(value: unknown): RobotEventsEntity {
   return value && typeof value === 'object' ? (value as RobotEventsEntity) : {};
@@ -69,13 +78,13 @@ function normalizeEvent(raw: unknown): EventSummary {
   const firstDivision = asRecord(divisions[0]);
 
   return {
-    id: text(event.id, text(event.sku, currentEvent.id)),
-    name: text(event.name, currentEvent.name),
-    location: [location.city, location.region, location.country].map((part) => text(part)).filter(Boolean).join(', ') || currentEvent.location,
-    date: text(event.start, currentEvent.date).slice(0, 10),
+    id: text(event.id, text(event.sku, emptyEventFallback.id)),
+    name: text(event.name, emptyEventFallback.name),
+    location: [location.city, location.region, location.country].map((part) => text(part)).filter(Boolean).join(', ') || emptyEventFallback.location,
+    date: text(event.start, emptyEventFallback.date).slice(0, 10),
     status: 'Fresh',
-    teamCount: num(event.team_count, currentEvent.teamCount),
-    division: text(firstDivision.name, currentEvent.division),
+    teamCount: num(event.team_count, emptyEventFallback.teamCount),
+    division: text(firstDivision.name, emptyEventFallback.division),
   };
 }
 
@@ -137,14 +146,14 @@ export const robotEventsAdapter = {
   async searchEvents(query = ''): Promise<ApiResponse<EventSummary[]>> {
     const params = new URLSearchParams({ per_page: '12' });
     if (query.trim()) params.set('name', query.trim());
-    const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/events?${params.toString()}`, [currentEvent]);
+    const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/events?${params.toString()}`, []);
     return response.ok ? { ...response, data: response.data.map(normalizeEvent) } : response;
   },
   async getEventMatches(eventId?: string): Promise<ApiResponse<Match[]>> {
     if (!eventId || !/^\d+$/.test(eventId)) {
-      return apiOk(matches, { source: 'fallback', liveStatus: 'Stale', error: 'Select a live RobotEvents event to load official matches.' });
+      return apiOk([], { source: 'fallback', liveStatus: 'Stale', error: 'Select a live RobotEvents event to load official matches.' });
     }
-    const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/events/${eventId}/matches?per_page=100`, matches);
+    const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/events/${eventId}/matches?per_page=100`, []);
     return response.ok ? { ...response, data: response.data.map(normalizeMatch) } : response;
   },
   async searchTeams(query = ''): Promise<ApiResponse<Team[]>> {
@@ -156,26 +165,13 @@ export const robotEventsAdapter = {
       if (response.ok && response.data.length) return { ...response, data: response.data.map(normalizeTeam) };
     }
 
-    const lower = normalized.toLowerCase();
-    const result = lower
-      ? teams.filter((team) => `${team.number} ${team.name} ${team.tags.join(' ')}`.toLowerCase().includes(lower))
-      : teams;
-    return apiOk(result, { source: 'fallback', liveStatus: normalized ? 'Stale' : 'Demo' });
-  },
-};
-
-export const scoutingService = {
-  async listNotes(): Promise<ApiResponse<ScoutingNote[]>> {
-    return apiOk(notes, { offlineCapable: true });
-  },
-  async createNote(note: Omit<ScoutingNote, 'id' | 'updatedAt'>): Promise<ApiResponse<ScoutingNote>> {
-    return apiOk({ ...note, id: crypto.randomUUID(), updatedAt: 'now' });
+    return apiOk([], { source: 'fallback', liveStatus: normalized ? 'Stale' : 'Fresh' });
   },
 };
 
 export const robotService = {
   async listProjects(): Promise<ApiResponse<RobotProject[]>> {
-    return apiOk(robotProjects);
+    return apiOk([]);
   },
   async simulate(robotId: string): Promise<ApiResponse<{ poses: Array<{ x: number; y: number; heading: number }>; warnings: string[] }>> {
     return apiOk({
