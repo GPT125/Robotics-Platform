@@ -1,4 +1,3 @@
-import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 type ServerReq = { url?: string; method?: string; on: (event: string, callback: (chunk?: Buffer) => void) => void };
@@ -145,6 +144,53 @@ function platformApi(mode: string): Plugin {
   const env = loadEnv(mode, process.cwd(), '');
   const token = env.ROBOTEVENTS_API_TOKEN;
   const cache = new Map<string, { at: number; body: string; status: number; contentType: string }>();
+
+  async function mockRouteHandler(req: ServerReq, res: ServerRes) {
+    if (!req.url?.startsWith('/api/')) return false;
+    const url = new URL(req.url, 'http://localhost');
+    const path = url.pathname;
+    const postRoutes = [
+      '/api/scouting/notes',
+      '/api/compare',
+      '/api/alliance/recommend',
+      '/api/matches/predict',
+      '/api/ai/coach',
+      '/api/picklist/update',
+      '/api/messages/conversations',
+      '/api/messages/ai/summarize',
+      '/api/messages/ai/strategy',
+      '/api/messages/ai/picklist',
+      '/api/messages/mark-read',
+    ];
+    const isMessagesMutation = /^\/api\/messages\/[^/]+\/(reactions|pin)$/.test(path) || /^\/api\/messages\/conversations\/[^/]+\/messages$/.test(path);
+    const isMessageItem = /^\/api\/messages\/[^/]+$/.test(path);
+    const getRoutes = [
+      '/api/events/search',
+      '/api/messages/conversations',
+    ];
+    const isEventDetail = /^\/api\/events\/[^/]+(\/matches|\/rankings|\/skills)?$/.test(path);
+    const isTeamDetail = /^\/api\/teams\/[^/]+$/.test(path);
+    const isConversationDetail = /^\/api\/messages\/conversations\/[^/]+(\/messages)?$/.test(path);
+
+    if (!(getRoutes.includes(path) || postRoutes.includes(path) || isEventDetail || isTeamDetail || isConversationDetail || isMessagesMutation || isMessageItem)) return false;
+
+    const body = req.method === 'POST' || req.method === 'PATCH' ? await readJsonBody(req) : {};
+    res.setHeader('Content-Type', 'application/json');
+    res.statusCode = 200;
+    res.end(
+      JSON.stringify({
+        ok: true,
+        data: {
+          route: path,
+          method: req.method,
+          cached: true,
+          received: body,
+          message: 'RoboLab API stub. RobotEvents and AI provider secrets remain server-side.',
+        },
+      }),
+    );
+    return true;
+  }
 
   async function robotEventsHandler(req: ServerReq, res: ServerRes) {
     if (!req.url?.startsWith('/api/robotevents')) return false;
@@ -309,6 +355,7 @@ function platformApi(mode: string): Plugin {
     name: 'robolab-platform-api',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
+        if (await mockRouteHandler(req as ServerReq, res)) return;
         if (await robotEventsHandler(req as ServerReq, res)) return;
         if (await aiHandler(req as ServerReq, res)) return;
         if (await statusHandler(req as ServerReq, res)) return;
@@ -318,6 +365,7 @@ function platformApi(mode: string): Plugin {
     },
     configurePreviewServer(server) {
       server.middlewares.use(async (req, res, next) => {
+        if (await mockRouteHandler(req as ServerReq, res)) return;
         if (await robotEventsHandler(req as ServerReq, res)) return;
         if (await aiHandler(req as ServerReq, res)) return;
         if (await statusHandler(req as ServerReq, res)) return;
@@ -329,7 +377,7 @@ function platformApi(mode: string): Plugin {
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), platformApi(mode)],
+  plugins: [platformApi(mode)],
   server: {
     port: 5173,
   },

@@ -1,134 +1,246 @@
-export type ApiResponse<T> =
-  | { ok: true; data: T; meta?: Record<string, unknown> }
-  | { ok: false; error: { code: string; message: string; details?: unknown } };
-
-export type Confidence = 'Low data' | 'Medium confidence' | 'High confidence' | 'Verified';
+export type Confidence = 'High' | 'Medium' | 'Low' | 'Not enough data';
+export type SyncState = 'local_only' | 'syncing' | 'synced' | 'failed' | 'conflict';
 
 export type Team = {
   number: string;
   name: string;
   organization: string;
   region: string;
+  skillsRank: number;
+  skillsScore: number;
+  programmingSkills: number;
+  driverSkills: number;
   winRate: number;
   avgScore: number;
   maxScore: number;
+  recentForm: number;
   consistency: number;
-  autonSignal: number;
-  skills: number;
-  risk: number;
+  autonomousSignal: number;
+  reliability: number;
+  scoutTrust: number;
+  riskScore: number;
   tags: string[];
-  confidence: Confidence;
+  notesSummary: string;
 };
 
-export type TeamTrendYear = {
-  season: string;
-  year: number;
-  events: number;
-  matches: number;
-  wins: number;
-  losses: number;
-  ties: number;
-  winRate: number;
-  avgRank: number;
-  bestRank: number;
-  bestSkills: number;
-  avgScore: number;
-  maxScore: number;
-  opr: number;
-};
-
-export type TeamTournament = {
+export type Event = {
   id: string;
-  sku: string;
   name: string;
-  season: string;
+  sku: string;
+  region: string;
+  venue: string;
   date: string;
-  location: string;
-  rank: number;
-  record: string;
-  winRate: number;
-  skills: number;
-  awards: string[];
+  division: string;
+  status: 'Fresh' | 'Updating' | 'Stale' | 'Offline';
 };
 
 export type Match = {
   id: string;
   number: string;
   field: string;
-  startsAt: string;
+  time: string;
   red: string[];
   blue: string[];
   redScore?: number;
   blueScore?: number;
-  prediction: {
-    winner: 'red' | 'blue';
-    probability: number;
-    confidence: Confidence;
-    reasons: string[];
+};
+
+export type Ranking = {
+  teamNumber: string;
+  rank: number;
+  wp: number;
+  ap: number;
+  sp: number;
+  record: string;
+};
+
+export type SkillsResult = {
+  teamNumber: string;
+  programming: number;
+  driver: number;
+  total: number;
+  rank: number;
+};
+
+export type ScoutingNote = {
+  id: string;
+  teamNumber: string;
+  matchNumber?: string;
+  mode: 'match' | 'pit' | 'super' | 'review';
+  alliance?: 'red' | 'blue';
+  tags: string[];
+  body: string;
+  author: string;
+  createdAt: string;
+  syncState: SyncState;
+  autonomousSuccess?: boolean;
+  driverControl?: number;
+  defense?: number;
+  scoringEstimate?: number;
+  mechanicalIssue?: boolean;
+  disabledOrTipped?: boolean;
+};
+
+export type PitScoutNote = ScoutingNote & {
+  drivetrain?: string;
+  intake?: string;
+  lift?: string;
+  endgame?: string;
+  autonomousRoutines?: string;
+  photos?: string[];
+};
+
+export type MatchScoutNote = ScoutingNote & {
+  penalties?: number;
+};
+
+export type TeamMetric = {
+  key: string;
+  label: string;
+  why: string;
+};
+
+export type CompareResult = {
+  teams: string[];
+  bestByMetric: Record<string, string>;
+  weakestByMetric: Record<string, string>;
+  warnings: string[];
+};
+
+export type AllianceRecommendation = {
+  teamNumber: string;
+  compatibility: number;
+  confidence: Confidence;
+  reason: string;
+  risk: string;
+  scoutSummary: string;
+  formula: {
+    performanceScore: number;
+    consistencyScore: number;
+    autonomousFit: number;
+    roleComplement: number;
+    skillsStrength: number;
+    scoutTrustScore: number;
+    riskPenalty: number;
   };
 };
 
-export type EventSummary = {
+export type MatchPrediction = {
+  matchId: string;
+  redWinProbability: number;
+  blueWinProbability: number;
+  confidence: Confidence;
+  expectedScoreRange: string;
+  reasons: string[];
+  strategy: string;
+  risks: string[];
+};
+
+export type AIInsight = {
+  id: string;
+  title: string;
+  summary: string;
+  confidence: Confidence;
+  dataSources: string[];
+  actions: string[];
+};
+
+export type PickList = {
+  tiers: Record<'A' | 'B' | 'C' | 'D' | 'Avoid', string[]>;
+};
+
+export type Workspace = {
   id: string;
   name: string;
-  location: string;
-  date: string;
-  status: 'Fresh' | 'Updating' | 'Stale' | 'Offline';
-  teamCount: number;
-  division: string;
+  teamNumber: string;
+  teamName: string;
+  eventId: string;
+  syncStatus: Event['status'];
+};
+
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string;
+  lastSeenAt: string;
+};
+
+export type WorkspaceMember = {
+  workspaceId: string;
+  userId: string;
+  role: 'owner' | 'coach' | 'captain' | 'scout' | 'member';
+};
+
+export type ConversationType = 'direct' | 'group' | 'event' | 'match' | 'alliance' | 'robot';
+
+export type Conversation = {
+  id: string;
+  workspaceId: string;
+  type: ConversationType;
+  name: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  contextType?: 'team' | 'event' | 'match' | 'picklist' | 'robot';
+  contextId?: string;
+  isPinned: boolean;
+  isMuted: boolean;
+  unreadCount: number;
+  memberIds: string[];
+  lastMessagePreview: string;
+};
+
+export type ConversationMember = {
+  conversationId: string;
+  userId: string;
+  role: 'owner' | 'member';
+  joinedAt: string;
+  lastReadAt: string;
+};
+
+export type Message = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  messageType: 'text' | 'card' | 'ai_insight' | 'system';
+  attachmentsJson?: unknown;
+  contextLinksJson?: unknown;
+  createdAt: string;
+  editedAt?: string;
+  deletedAt?: string;
+  status: 'sending' | 'sent' | 'failed' | 'read';
+};
+
+export type MessageReaction = {
+  id: string;
+  messageId: string;
+  userId: string;
+  emoji: '👍' | '👀' | '✅' | '⚠️' | '🤖';
+  createdAt: string;
+};
+
+export type PinnedMessage = {
+  id: string;
+  conversationId: string;
+  messageId: string;
+  pinnedBy: string;
+  createdAt: string;
+};
+
+export type AIInsightMessage = {
+  id: string;
+  messageId: string;
+  insightType: 'summary' | 'strategy' | 'picklist' | 'risk';
+  summary: string;
+  confidence: Confidence;
+  dataSources: string[];
+  actionButtonsJson: string[];
 };
 
 export type RobotProject = {
   id: string;
   name: string;
-  season: string;
-  status: 'Needs calibration' | 'Ready to simulate' | 'Code warnings';
-  dimensions: {
-    length: number;
-    width: number;
-    height: number;
-    wheelDiameter: number;
-    trackWidth: number;
-    wheelbase: number;
-    gearRatio: string;
-    mass: number;
-    friction: number;
-    calibrationScore: Confidence;
-  };
-};
-
-export type CodePatch = {
-  codeVersionId: string;
-  filePath: string;
-  insertAfter?: { line: number; pattern?: string };
-  oldText?: string;
-  newText: string;
-  reason: string;
-  generatedBy: 'path_planner' | 'motor_mapper' | 'troubleshooter';
-};
-
-export type AiProviderResult = {
-  provider: string;
-  model?: string;
-  status: 'ready' | 'missing_key' | 'ok' | 'error';
-  content?: string;
-  error?: string;
-};
-
-export type AiAdvice = {
-  task: string;
-  summary: string;
-  providers: AiProviderResult[];
-};
-
-export type IntegrationStatus = {
-  key: string;
-  configured: boolean;
-  feature: string;
-};
-
-export type SponsorSignal = {
-  source: string;
-  status: 'ok' | 'missing_key' | 'error';
-  summary: string;
+  status: 'Ready' | 'Needs calibration' | 'Code warnings';
 };
