@@ -37,6 +37,20 @@ export type TeamTrendYear = {
   opr: number;
 };
 
+export type TeamTournament = {
+  id: string;
+  sku: string;
+  name: string;
+  season: string;
+  date: string;
+  location: string;
+  rank: number;
+  record: string;
+  winRate: number;
+  skills: number;
+  awards: string[];
+};
+
 export type Match = {
   id: string;
   number: string;

@@ -1,4 +1,4 @@
-import type { AiAdvice, CodePatch, EventSummary, IntegrationStatus, Match, RobotProject, SponsorSignal, Team, TeamTrendYear, ApiResponse } from '../types';
+import type { AiAdvice, CodePatch, EventSummary, IntegrationStatus, Match, RobotProject, SponsorSignal, Team, TeamTournament, TeamTrendYear, ApiResponse } from '../types';
 
 const delay = (ms = 260) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -96,21 +96,22 @@ function normalizeTeam(raw: unknown): Team {
   const team = asRecord(raw);
   const location = asRecord(team.location);
   const number = text(team.number, 'Unknown');
+  const registered = bool(team.registered);
 
   return {
     number,
     name: text(team.team_name, text(team.name, 'RobotEvents team')),
     organization: text(team.organization, 'Unknown organization'),
-    region: text(location.region, text(location.country, '')),
+    region: [location.city, location.region, location.country].map((part) => text(part)).filter(Boolean).join(', '),
     winRate: 0,
     avgScore: 0,
     maxScore: 0,
     consistency: 0,
     autonSignal: 0,
     skills: 0,
-    risk: 0,
-    tags: ['live RobotEvents'],
-    confidence: 'Low data',
+    risk: registered ? 8 : 18,
+    tags: [`id:${text(team.id)}`, registered ? 'registered' : 'historical', 'VEX Events'].filter(Boolean),
+    confidence: registered ? 'High confidence' : 'Medium confidence',
   };
 }
 
@@ -150,7 +151,7 @@ function normalizeVexDbTeam(raw: unknown): Team {
 }
 
 function seasonFromSku(sku: unknown) {
-  const match = text(sku).match(/RE-VRC-(\d{2})-/i);
+  const match = text(sku).match(/RE-V(?:5)?RC-(\d{2})-/i);
   return match ? 2000 + Number(match[1]) : 0;
 }
 
@@ -161,6 +162,34 @@ function seasonFromDate(value: unknown) {
 
 function seasonLabel(year: number) {
   return year ? `${year}-${String(year + 1).slice(2)}` : 'Unknown';
+}
+
+function yearFromRobotEventsEntry(raw: unknown) {
+  const entry = asRecord(raw);
+  const season = asRecord(entry.season);
+  const seasonName = text(season.name);
+  const seasonYear = seasonName.match(/\b(20\d{2})[-/ ]?(?:20)?\d{2}\b/);
+  if (seasonYear) return Number(seasonYear[1]);
+  const event = asRecord(entry.event);
+  return seasonFromDate(entry.start) || seasonFromDate(entry.scheduled) || seasonFromDate(event.start) || seasonFromSku(text(event.code, text(entry.sku)));
+}
+
+function eventKey(raw: unknown) {
+  const event = asRecord(raw);
+  return text(event.id, text(event.code, text(event.sku, text(event.name))));
+}
+
+function eventSummary(raw: unknown) {
+  const event = asRecord(raw);
+  const location = asRecord(event.location);
+  return {
+    id: text(event.id, eventKey(event)),
+    sku: text(event.code, text(event.sku)),
+    name: text(event.name, 'Tournament'),
+    season: text(asRecord(event.season).name, seasonLabel(yearFromRobotEventsEntry(event))),
+    date: text(event.start).slice(0, 10),
+    location: [location.city, location.region, location.country].map((part) => text(part)).filter(Boolean).join(', '),
+  };
 }
 
 function buildTrendRows(args: { rankings: unknown[]; skills: unknown[]; matches: unknown[]; teamNumber: string }): TeamTrendYear[] {
@@ -258,6 +287,171 @@ function buildTrendRows(args: { rankings: unknown[]; skills: unknown[]; matches:
     .sort((a, b) => a.year - b.year);
 }
 
+function buildRobotEventsTrendRows(args: { rankings: unknown[]; skills: unknown[]; matches: unknown[]; events: unknown[]; teamNumber: string }): TeamTrendYear[] {
+  const years = new Map<number, {
+    events: Set<string>;
+    matches: number;
+    wins: number;
+    losses: number;
+    ties: number;
+    ranks: number[];
+    skills: number[];
+    scores: number[];
+  }>();
+  const ensure = (year: number) => {
+    const safeYear = year || new Date().getFullYear();
+    if (!years.has(safeYear)) years.set(safeYear, { events: new Set(), matches: 0, wins: 0, losses: 0, ties: 0, ranks: [], skills: [], scores: [] });
+    return years.get(safeYear)!;
+  };
+
+  args.events.forEach((eventRaw) => {
+    const event = asRecord(eventRaw);
+    const bucket = ensure(yearFromRobotEventsEntry(event));
+    const key = eventKey(event);
+    if (key) bucket.events.add(key);
+  });
+
+  args.rankings.forEach((rankingRaw) => {
+    const ranking = asRecord(rankingRaw);
+    const event = asRecord(ranking.event);
+    const bucket = ensure(yearFromRobotEventsEntry(ranking));
+    const key = eventKey(event);
+    if (key) bucket.events.add(key);
+    bucket.wins += num(ranking.wins);
+    bucket.losses += num(ranking.losses);
+    bucket.ties += num(ranking.ties);
+    if (num(ranking.rank)) bucket.ranks.push(num(ranking.rank));
+    if (num(ranking.average_points)) bucket.scores.push(num(ranking.average_points));
+    if (num(ranking.high_score)) bucket.scores.push(num(ranking.high_score));
+  });
+
+  args.skills.forEach((skillRaw) => {
+    const skill = asRecord(skillRaw);
+    const bucket = ensure(yearFromRobotEventsEntry(skill));
+    const key = eventKey(asRecord(skill.event));
+    if (key) bucket.events.add(key);
+    if (num(skill.score)) bucket.skills.push(num(skill.score));
+  });
+
+  args.matches.forEach((matchRaw) => {
+    const match = asRecord(matchRaw);
+    const bucket = ensure(yearFromRobotEventsEntry(match));
+    const key = eventKey(asRecord(match.event));
+    if (key) bucket.events.add(key);
+    const alliances = Array.isArray(match.alliances) ? match.alliances.map(asRecord) : [];
+    const ownAlliance = alliances.find((alliance) => {
+      const teams = Array.isArray(alliance.teams) ? alliance.teams.map(asRecord) : [];
+      return teams.some((entry) => text(asRecord(entry.team).name).toUpperCase() === args.teamNumber.toUpperCase());
+    });
+    if (!ownAlliance) return;
+    const ownScore = num(ownAlliance.score);
+    bucket.matches += 1;
+    bucket.scores.push(ownScore);
+  });
+
+  return Array.from(years.entries())
+    .map(([year, bucket]) => {
+      const decided = bucket.wins + bucket.losses + bucket.ties;
+      const avg = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+      return {
+        season: seasonLabel(year),
+        year,
+        events: bucket.events.size,
+        matches: decided || bucket.matches,
+        wins: bucket.wins,
+        losses: bucket.losses,
+        ties: bucket.ties,
+        winRate: decided ? bucket.wins / decided : 0,
+        avgRank: Math.round(avg(bucket.ranks)),
+        bestRank: bucket.ranks.length ? Math.min(...bucket.ranks) : 0,
+        bestSkills: bucket.skills.length ? Math.max(...bucket.skills) : 0,
+        avgScore: Math.round(avg(bucket.scores)),
+        maxScore: bucket.scores.length ? Math.max(...bucket.scores) : 0,
+        opr: 0,
+      };
+    })
+    .sort((a, b) => b.year - a.year)
+    .slice(0, 5)
+    .sort((a, b) => a.year - b.year);
+}
+
+function buildTournaments(args: { events: unknown[]; rankings: unknown[]; skills: unknown[]; awards: unknown[] }): TeamTournament[] {
+  const rows = new Map<string, TeamTournament>();
+  args.events.forEach((eventRaw) => {
+    const event = eventSummary(eventRaw);
+    rows.set(event.id, {
+      ...event,
+      rank: 0,
+      record: '-',
+      winRate: 0,
+      skills: 0,
+      awards: [],
+    });
+  });
+  args.rankings.forEach((rankingRaw) => {
+    const ranking = asRecord(rankingRaw);
+    const event = eventSummary(ranking.event);
+    const wins = num(ranking.wins);
+    const losses = num(ranking.losses);
+    const ties = num(ranking.ties);
+    const existing = rows.get(event.id) ?? { ...event, rank: 0, record: '-', winRate: 0, skills: 0, awards: [] };
+    rows.set(event.id, {
+      ...existing,
+      ...event,
+      rank: num(ranking.rank),
+      record: `${wins}-${losses}-${ties}`,
+      winRate: wins + losses + ties ? wins / (wins + losses + ties) : 0,
+    });
+  });
+  args.skills.forEach((skillRaw) => {
+    const skill = asRecord(skillRaw);
+    const event = eventSummary(skill.event);
+    const existing = rows.get(event.id) ?? { ...event, rank: 0, record: '-', winRate: 0, skills: 0, awards: [] };
+    existing.skills = Math.max(existing.skills, num(skill.score));
+    rows.set(event.id, existing);
+  });
+  args.awards.forEach((awardRaw) => {
+    const award = asRecord(awardRaw);
+    const event = eventSummary(award.event);
+    const existing = rows.get(event.id) ?? { ...event, rank: 0, record: '-', winRate: 0, skills: 0, awards: [] };
+    const title = text(award.title);
+    if (title && !existing.awards.includes(title)) existing.awards.push(title);
+    rows.set(event.id, existing);
+  });
+  return Array.from(rows.values()).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
+}
+
+async function searchCurrentTeams(normalized: string): Promise<ApiResponse<Team[]>> {
+  const params = new URLSearchParams({ per_page: '20', myTeams: 'false' });
+  params.append('number[]', normalized);
+  params.append('program[]', '1');
+  const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/teams?${params.toString()}`, []);
+  if (response.ok && response.data.length) return { ...response, data: response.data.map(normalizeTeam) };
+
+  const fallback = await fetchVexDb<unknown[]>(`get_teams?team=${encodeURIComponent(normalized)}`, []);
+  return fallback.ok ? { ...fallback, data: fallback.data.map(normalizeVexDbTeam) } : fallback;
+}
+
+async function currentTeamId(normalized: string) {
+  const teamResponse = await searchCurrentTeams(normalized);
+  const currentTeam = teamResponse.ok ? teamResponse.data[0] : undefined;
+  return currentTeam?.tags.find((tag) => tag.startsWith('id:'))?.slice(3);
+}
+
+async function fallbackTrends(normalized: string) {
+  const [rankings, skills, matches] = await Promise.all([
+    fetchVexDb<unknown[]>(`get_rankings?team=${encodeURIComponent(normalized)}`, []),
+    fetchVexDb<unknown[]>(`get_skills?team=${encodeURIComponent(normalized)}`, []),
+    fetchVexDb<unknown[]>(`get_matches?team=${encodeURIComponent(normalized)}`, []),
+  ]);
+  return buildTrendRows({
+    rankings: rankings.ok ? rankings.data : [],
+    skills: skills.ok ? skills.data : [],
+    matches: matches.ok ? matches.data : [],
+    teamNumber: normalized,
+  });
+}
+
 function allianceTeamLabel(raw: unknown) {
   const entry = asRecord(raw);
   const nested = asRecord(entry.team);
@@ -306,33 +500,62 @@ export const robotEventsAdapter = {
   },
   async searchTeams(query = ''): Promise<ApiResponse<Team[]>> {
     const normalized = query.trim();
-    if (normalized) {
-      const params = new URLSearchParams({ per_page: '20', myTeams: 'false' });
-      params.append('number[]', normalized);
-      params.append('program[]', '1');
-      const response = await fetchRobotEvents<unknown[]>(`/api/robotevents/teams?${params.toString()}`, []);
-      if (response.ok && response.data.length) return { ...response, data: response.data.map(normalizeTeam) };
-
-      const fallback = await fetchVexDb<unknown[]>(`get_teams?team=${encodeURIComponent(normalized)}`, []);
-      return fallback.ok ? { ...fallback, data: fallback.data.map(normalizeVexDbTeam) } : fallback;
-    }
+    if (normalized) return searchCurrentTeams(normalized);
 
     return apiOk([], { source: 'fallback', liveStatus: normalized ? 'Stale' : 'Fresh' });
   },
   async getTeamTrends(query = ''): Promise<ApiResponse<TeamTrendYear[]>> {
     const normalized = query.trim();
     if (!normalized) return apiOk([], { source: 'fallback', liveStatus: 'Fresh' });
-    const [rankings, skills, matches] = await Promise.all([
-      fetchVexDb<unknown[]>(`get_rankings?team=${encodeURIComponent(normalized)}`, []),
-      fetchVexDb<unknown[]>(`get_skills?team=${encodeURIComponent(normalized)}`, []),
-      fetchVexDb<unknown[]>(`get_matches?team=${encodeURIComponent(normalized)}`, []),
-    ]);
-    return apiOk(buildTrendRows({
-      rankings: rankings.ok ? rankings.data : [],
-      skills: skills.ok ? skills.data : [],
-      matches: matches.ok ? matches.data : [],
-      teamNumber: normalized,
-    }), { source: 'VexDB', liveStatus: 'Fresh' });
+    const teamId = await currentTeamId(normalized);
+    if (teamId) {
+      const [events, rankings, skills, matches] = await Promise.all([
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/events?per_page=250`, []),
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/rankings?per_page=250`, []),
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/skills?per_page=250`, []),
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/matches?per_page=250`, []),
+      ]);
+      const rows = buildRobotEventsTrendRows({
+        events: events.ok ? events.data : [],
+        rankings: rankings.ok ? rankings.data : [],
+        skills: skills.ok ? skills.data : [],
+        matches: matches.ok ? matches.data : [],
+        teamNumber: normalized,
+      });
+      if (rows.length) return apiOk(rows, { source: 'VEX Events', liveStatus: 'Fresh' });
+    }
+    return apiOk(await fallbackTrends(normalized), { source: 'VexDB', liveStatus: 'Fresh' });
+  },
+  async getTeamHistory(query = ''): Promise<ApiResponse<{ trends: TeamTrendYear[]; tournaments: TeamTournament[] }>> {
+    const normalized = query.trim();
+    if (!normalized) return apiOk({ trends: [], tournaments: [] }, { source: 'fallback', liveStatus: 'Fresh' });
+    const teamId = await currentTeamId(normalized);
+    if (teamId) {
+      const [events, rankings, skills, matches, awards] = await Promise.all([
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/events?per_page=250`, []),
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/rankings?per_page=250`, []),
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/skills?per_page=250`, []),
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/matches?per_page=250`, []),
+        fetchRobotEvents<unknown[]>(`/api/robotevents/teams/${teamId}/awards?per_page=250`, []),
+      ]);
+      const payload = {
+        trends: buildRobotEventsTrendRows({
+          events: events.ok ? events.data : [],
+          rankings: rankings.ok ? rankings.data : [],
+          skills: skills.ok ? skills.data : [],
+          matches: matches.ok ? matches.data : [],
+          teamNumber: normalized,
+        }),
+        tournaments: buildTournaments({
+          events: events.ok ? events.data : [],
+          rankings: rankings.ok ? rankings.data : [],
+          skills: skills.ok ? skills.data : [],
+          awards: awards.ok ? awards.data : [],
+        }),
+      };
+      if (payload.trends.length || payload.tournaments.length) return apiOk(payload, { source: 'VEX Events', liveStatus: 'Fresh' });
+    }
+    return apiOk({ trends: await fallbackTrends(normalized), tournaments: [] }, { source: 'VexDB fallback', liveStatus: 'Stale' });
   },
 };
 

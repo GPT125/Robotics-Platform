@@ -21,6 +21,7 @@ import {
   Radar,
   Save,
   Search,
+  Send,
   ShieldCheck,
   Sparkles,
   Trophy,
@@ -37,6 +38,8 @@ import { vexFields, vexParts } from './data/vexAssets';
 import { aiAdvisor, integrationsAdapter, pathService, robotEventsAdapter, robotService } from './services/api';
 import type { LucideIcon } from 'lucide-react';
 import type { Team } from './types';
+
+type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
 function PrimaryButton({ children, onClick, type = 'button' }: { children: React.ReactNode; onClick?: () => void; type?: 'button' | 'submit' }) {
   return (
@@ -78,16 +81,40 @@ function LiveStatus({ status, detail }: { status: unknown; detail?: unknown }) {
   );
 }
 
+function FormattedAiMessage({ content }: { content: string }) {
+  const lines = content.split('\n').map((line) => line.trim()).filter(Boolean);
+  const clean = (value: string) => value.replace(/\*\*/g, '').replace(/^[-*]\s*/, '').replace(/^\d+\.\s*/, '');
+  return (
+    <div className="space-y-3">
+      {lines.map((line, index) => {
+        const isHeading = /:$/.test(line) || (line.length < 56 && !/^[-*\d]/.test(line) && index === 0);
+        const isList = /^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line);
+        if (isHeading) return <p className="text-sm font-semibold text-white" key={`${line}-${index}`}>{clean(line).replace(/:$/, '')}</p>;
+        if (isList) return <p className="rounded-lg border border-line bg-white/5 px-3 py-2 text-sm leading-6 text-slate-300" key={`${line}-${index}`}>{clean(line)}</p>;
+        return <p className="text-sm leading-6 text-slate-300" key={`${line}-${index}`}>{clean(line)}</p>;
+      })}
+    </div>
+  );
+}
+
 function AiCoachPanel({ title, task, context }: { title: string; task: string; context: string }) {
   const [loading, setLoading] = useState(false);
-  const [advice, setAdvice] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [reviewStatus, setReviewStatus] = useState('');
 
-  async function runCoach() {
+  async function runCoach(customPrompt?: string) {
+    const userPrompt = customPrompt?.trim() || prompt.trim() || task;
+    if (!userPrompt || loading) return;
     setLoading(true);
-    const response = await aiAdvisor.ask(task, context);
+    setPrompt('');
+    setMessages((current) => [...current, { role: 'user', content: userPrompt }]);
+    const response = await aiAdvisor.ask(
+      'Act as RoboLab AI inside the RoboLab VEX platform.',
+      `Workspace context:\n${context}\n\nUser message:\n${userPrompt}\n\nAnswer with practical VEX/V5RC guidance and mention RoboLab tools when useful.`,
+    );
     if (response.ok) {
-      setAdvice(response.data.summary);
+      setMessages((current) => [...current, { role: 'assistant', content: response.data.summary }]);
       const completed = response.data.providers.filter((provider) => provider.status === 'ok').length;
       setReviewStatus(completed ? `${completed} AI reviewer${completed === 1 ? '' : 's'} completed analysis.` : 'AI analysis completed with limited coverage.');
     }
@@ -99,14 +126,41 @@ function AiCoachPanel({ title, task, context }: { title: string; task: string; c
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-semibold">{title}</h2>
-          <p className="mt-1 text-sm text-slate-400">Runs a private multi-reviewer analysis through the server.</p>
+          <p className="mt-1 text-sm text-slate-400">Talk with RoboLab AI about scouting, code, strategy, CAD, and match prep.</p>
         </div>
-        <PrimaryButton onClick={runCoach}>
-          <Sparkles size={18} /> {loading ? 'Asking AI...' : 'Ask AI team'}
+        <PrimaryButton onClick={() => { void runCoach(task); }}>
+          <Sparkles size={18} /> {loading ? 'Thinking...' : 'Start with RoboLab'}
         </PrimaryButton>
       </div>
       {reviewStatus ? <p className="mt-4 rounded-lg border border-line bg-white/5 px-3 py-2 text-xs text-slate-400">{reviewStatus}</p> : null}
-      {advice ? <pre className="mt-4 max-h-72 overflow-auto rounded-lg border border-line bg-ink p-4 text-xs leading-5 text-slate-300 whitespace-pre-wrap">{advice}</pre> : null}
+      <div className="mt-4 max-h-[420px] space-y-3 overflow-auto rounded-xl border border-line bg-white/5 p-3">
+        {messages.length ? messages.map((message, index) => (
+          <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`} key={`${message.role}-${index}`}>
+            <div className={`max-w-[82%] rounded-2xl px-4 py-3 shadow-sm ${message.role === 'user' ? 'bg-primary text-white' : 'border border-line bg-ink text-slate-200'}`}>
+              {message.role === 'assistant' ? <FormattedAiMessage content={message.content} /> : <p className="text-sm leading-6">{message.content}</p>}
+            </div>
+          </div>
+        )) : (
+          <div className="grid min-h-32 place-items-center text-center">
+            <div>
+              <Sparkles className="mx-auto text-electric" size={24} />
+              <p className="mt-2 text-sm font-medium text-white">RoboLab AI is ready</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Ask a scouting, code, strategy, or robot troubleshooting question.</p>
+            </div>
+          </div>
+        )}
+      </div>
+      <form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); void runCoach(); }}>
+        <input
+          className="h-11 min-w-0 flex-1 rounded-lg border border-line bg-white/5 px-3 text-sm outline-none"
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          placeholder="Ask RoboLab AI a question..."
+        />
+        <SecondaryButton type="submit">
+          <Send size={18} /> Send
+        </SecondaryButton>
+      </form>
     </section>
   );
 }
@@ -570,15 +624,17 @@ export function AllianceBuilder() {
     enabled: teamQuery.trim().length > 1,
     staleTime: 60_000,
   });
-  const trendsQuery = useQuery({
-    queryKey: ['team-trends', teamQuery],
-    queryFn: () => robotEventsAdapter.getTeamTrends(teamQuery),
+  const historyQuery = useQuery({
+    queryKey: ['team-history', teamQuery],
+    queryFn: () => robotEventsAdapter.getTeamHistory(teamQuery),
     enabled: teamQuery.trim().length > 1,
     staleTime: 60_000,
   });
   const lookupTeams = teamsQuery.data?.ok ? teamsQuery.data.data : [];
   const liveEvents = eventsQuery.data?.ok ? eventsQuery.data.data : [];
-  const teamTrends = trendsQuery.data?.ok ? trendsQuery.data.data : [];
+  const teamHistory = historyQuery.data?.ok ? historyQuery.data.data : { trends: [], tournaments: [] };
+  const teamTrends = teamHistory.trends;
+  const tournaments = teamHistory.tournaments;
   const selectedTeam = lookupTeams[0];
   const latestTrend = teamTrends.at(-1);
   const totalTrendEvents = teamTrends.reduce((total, row) => total + row.events, 0);
@@ -600,7 +656,7 @@ export function AllianceBuilder() {
         <section className="space-y-4">
           <div className="panel p-4">
             <label className="text-sm font-medium text-slate-400" htmlFor="team-search">Team lookup</label>
-            <form className="lookup-search mt-2 flex gap-2" onSubmit={(event) => { event.preventDefault(); void teamsQuery.refetch(); void trendsQuery.refetch(); }}>
+            <form className="lookup-search mt-2 flex gap-2" onSubmit={(event) => { event.preventDefault(); void teamsQuery.refetch(); void historyQuery.refetch(); }}>
               <input
                 id="team-search"
                 className="h-11 min-w-0 flex-1 rounded-lg border border-line px-3 text-sm"
@@ -609,7 +665,7 @@ export function AllianceBuilder() {
                 placeholder="Search a team number"
               />
               <SecondaryButton type="submit">
-                <Search size={18} /> {teamsQuery.isFetching || trendsQuery.isFetching ? 'Searching...' : 'Search'}
+                <Search size={18} /> {teamsQuery.isFetching || historyQuery.isFetching ? 'Searching...' : 'Search'}
               </SecondaryButton>
             </form>
             {teamsQuery.data?.ok && teamsQuery.data.meta?.error ? <p className="mt-2 text-sm text-bad">{String(teamsQuery.data.meta.error)}</p> : null}
@@ -628,7 +684,7 @@ export function AllianceBuilder() {
                 </Link>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-4">
-                <MetricCard label="Events tracked" value={`${totalTrendEvents}`} detail="Past five seasons" icon={Trophy} tone="orange" />
+                <MetricCard label="Events tracked" value={`${totalTrendEvents}`} detail={historyQuery.data?.ok ? String(historyQuery.data.meta?.source ?? 'Live source') : 'Live source'} icon={Trophy} tone="orange" />
                 <MetricCard label="Best skills" value={bestTrendSkills ? `${bestTrendSkills}` : '-'} detail="Highest official skills score found" icon={Gauge} tone="green" />
                 <MetricCard label="Latest win rate" value={latestTrend ? `${Math.round(latestTrend.winRate * 100)}%` : '-'} detail={latestTrend?.season ?? 'No matches loaded'} icon={LineChart} tone="cyan" />
                 <MetricCard label="Best rank" value={bestTrendRank ? `${bestTrendRank}` : '-'} detail="Lowest event ranking number" icon={Activity} tone="blue" />
@@ -643,7 +699,7 @@ export function AllianceBuilder() {
                   <h2 className="font-semibold">Past 5 year trends</h2>
                   <p className="mt-1 text-sm text-slate-400">Season-by-season rankings, skills, scores, and match record.</p>
                 </div>
-                <span className="rounded-full border border-line px-3 py-1 text-xs text-slate-400">{trendsQuery.data?.ok ? String(trendsQuery.data.meta?.source ?? 'Live data') : 'Live data'}</span>
+                <span className="rounded-full border border-line px-3 py-1 text-xs text-slate-400">{historyQuery.data?.ok ? String(historyQuery.data.meta?.source ?? 'Live data') : 'Live data'}</span>
               </div>
               <div className="mt-4 h-72">
                 <ResponsiveContainer width="100%" height="100%">
@@ -684,8 +740,40 @@ export function AllianceBuilder() {
                 </table>
               </div>
             </div>
-          ) : teamQuery.trim().length > 1 && !trendsQuery.isFetching ? (
+          ) : teamQuery.trim().length > 1 && !historyQuery.isFetching ? (
             <EmptyState title="No historical trend found" detail="The lookup found no season history for this team number yet." />
+          ) : null}
+
+          {tournaments.length ? (
+            <div className="panel p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-semibold">Actual tournaments</h2>
+                  <p className="mt-1 text-sm text-slate-400">Recent VEX Events participation with rank, record, skills, and awards.</p>
+                </div>
+                <span className="rounded-full border border-line px-3 py-1 text-xs text-slate-400">{tournaments.length} shown</span>
+              </div>
+              <div className="mt-4 grid gap-3">
+                {tournaments.map((event) => (
+                  <article className="rounded-lg border border-line bg-white/5 p-4" key={event.id}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-white">{event.name}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">{event.season} · {event.date || 'Date unavailable'} · {event.location || event.sku}</p>
+                      </div>
+                      <span className="rounded-full border border-line px-3 py-1 text-xs text-slate-400">{event.sku || 'VEX Events'}</span>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                      <span className="rounded-lg border border-line bg-white/5 p-2 text-xs">Rank <b className="block text-sm text-white">{event.rank || '-'}</b></span>
+                      <span className="rounded-lg border border-line bg-white/5 p-2 text-xs">Record <b className="block text-sm text-white">{event.record}</b></span>
+                      <span className="rounded-lg border border-line bg-white/5 p-2 text-xs">Win rate <b className="block text-sm text-white">{event.winRate ? `${Math.round(event.winRate * 100)}%` : '-'}</b></span>
+                      <span className="rounded-lg border border-line bg-white/5 p-2 text-xs">Best skills <b className="block text-sm text-white">{event.skills || '-'}</b></span>
+                    </div>
+                    {event.awards.length ? <p className="mt-3 text-xs leading-5 text-slate-500">Awards: {event.awards.join(', ')}</p> : null}
+                  </article>
+                ))}
+              </div>
+            </div>
           ) : null}
 
           <div className="panel p-4">
@@ -755,7 +843,7 @@ export function AllianceBuilder() {
           <AiCoachPanel
             title="AI alliance strategy"
             task="Rank alliance selection risks and next scouting questions for VEX V5."
-            context={`Selection mode: ${selectionMode}\nPick list: ${pickList.map((team) => `${team.number} ${team.name}`).join(', ') || 'empty'}\nSearch query: ${teamQuery || 'none'}`}
+            context={`Selection mode: ${selectionMode}\nPick list: ${pickList.map((team) => `${team.number} ${team.name}`).join(', ') || 'empty'}\nSearch query: ${teamQuery || 'none'}\nLoaded team: ${selectedTeam ? `${selectedTeam.number} ${selectedTeam.name}` : 'none'}\nRecent tournaments: ${tournaments.slice(0, 6).map((event) => `${event.name} (${event.date}) rank ${event.rank || '-'} record ${event.record} skills ${event.skills || '-'}`).join('; ') || 'none'}\nTrend rows: ${teamTrends.map((row) => `${row.season}: ${row.wins}-${row.losses}-${row.ties}, best skills ${row.bestSkills || '-'}`).join('; ') || 'none'}`}
           />
         </section>
         <aside className="space-y-4">

@@ -70,7 +70,7 @@ async function callOpenAiCompatible(args: { provider: string; url: string; key?:
         {
           role: 'system',
           content:
-            'You are a VEX V5 robotics assistant. Give concise, practical, safety-aware advice. Focus on drivetrain, autonomous consistency, code issues, inspection legality, scouting, and competition workflow.',
+            'You are RoboLab AI, the built-in competition copilot for a VEX V5/V5RC platform. Give concise, practical, safety-aware advice tailored to RoboLab features: live team lookup, tournament history, scouting, alliance selection, VEXcode review, CAD checks, autonomous path planning, and robot troubleshooting. Format the response with short headings and bullets, not markdown tables.',
         },
         { role: 'user', content: args.prompt },
       ],
@@ -102,7 +102,7 @@ async function callHuggingFace(env: Record<string, string>, prompt: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      inputs: `VEX V5 robotics assistant. Give concise practical advice.\n\n${prompt}`,
+      inputs: `RoboLab AI for VEX V5/V5RC. Give concise practical advice for scouting, code, CAD, autonomous, alliance selection, and tournament prep.\n\n${prompt}`,
       parameters: { max_new_tokens: 260, return_full_text: false },
     }),
   });
@@ -122,7 +122,7 @@ function deterministicAdvice(task: string, context: string) {
     lower.includes('scout') || lower.includes('match') ? 'Prioritize data users can act on: auton success, driver cycle speed, defense impact, endgame reliability, and failure modes.' : '',
     lower.includes('cad') || lower.includes('part') ? 'Use official VEX CAD downloads or the Onshape VEX V5 parts library for legal parts and dimensions.' : '',
   ].filter(Boolean);
-  return checks.length ? checks.join(' ') : 'Start with the uploaded code, robot configuration, field objective, and observed failure. RoboLab will compare AI opinions and return an action checklist.';
+  return checks.length ? checks.join(' ') : 'RoboLab AI needs a team, robot subsystem, code file, event, or scouting question. Start with the uploaded code, robot configuration, field objective, and observed failure; RoboLab will return an action checklist.';
 }
 
 async function fetchJsonSummary(source: string, key: string | undefined, url: string, summarize: (json: unknown) => string) {
@@ -159,7 +159,7 @@ function platformApi(mode: string): Plugin {
 
     const incoming = new URL(req.url, 'http://localhost');
     const apiPath = incoming.pathname.replace(/^\/api\/robotevents/, '') || '/events';
-    const target = `https://www.robotevents.com/api/v2${apiPath}${incoming.search}`;
+    const target = `https://events.vex.com/api/v2${apiPath}${incoming.search}`;
     const cached = cache.get(target);
 
     if (cached && Date.now() - cached.at < 30_000) {
