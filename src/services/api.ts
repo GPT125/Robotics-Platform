@@ -1,4 +1,4 @@
-import { conversations, event, matches, messages, predictions, rankings, recommendations, skillsResults, teams } from '../data/mockData';
+import { conversations, event, matches, messages, predictions, rankings, recommendations, robotVisionAnalysis, skillsResults, teams, tournaments } from '../data/mockData';
 import type { AllianceRecommendation, Conversation, MatchPrediction, Message, ScoutingNote, Team } from '../types';
 
 const delay = (ms = 260) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -16,11 +16,18 @@ async function ok<T>(data: T, meta?: Record<string, unknown>): Promise<ApiResult
 
 export const api = {
   events: {
-    search: () => ok([event], { route: 'GET /api/events/search', source: 'cache' }),
+    search: () => ok(tournaments, { route: 'GET /api/events/search', source: 'server cache' }),
     byId: () => ok(event, { route: 'GET /api/events/:id', source: 'cache' }),
     matches: () => ok(matches, { route: 'GET /api/events/:id/matches', source: 'cache' }),
     rankings: () => ok(rankings, { route: 'GET /api/events/:id/rankings', source: 'cache' }),
     skills: () => ok(skillsResults, { route: 'GET /api/events/:id/skills', source: 'cache' }),
+  },
+  tournaments: {
+    search: (query: string) =>
+      ok(
+        tournaments.filter((tournament) => `${tournament.name} ${tournament.sku} ${tournament.city} ${tournament.state}`.toLowerCase().includes(query.toLowerCase())),
+        { route: 'GET /api/tournaments/search', source: 'server cache' },
+      ),
   },
   teams: {
     byNumber: (number: string) => ok(teams.find((team) => team.number.toLowerCase() === number.toLowerCase()) ?? teams[0], { route: 'GET /api/teams/:number' }),
@@ -77,6 +84,10 @@ export const api = {
         },
         { route: 'POST /api/messages/ai/summarize' },
       ),
+  },
+  robotLab: {
+    analyze: () => ok(robotVisionAnalysis, { route: 'POST /api/robot-lab/analyze', source: 'AI + official VEX catalog adapter' }),
+    partsCatalog: () => ok(robotVisionAnalysis.parts, { route: 'GET /api/robot-lab/parts-catalog', source: 'official VEX catalog cache' }),
   },
 };
 

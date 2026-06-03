@@ -27,11 +27,29 @@ export type Event = {
   id: string;
   name: string;
   sku: string;
+  program?: 'V5RC' | 'VIQRC' | 'VEX U' | 'VEX AI';
   region: string;
   venue: string;
   date: string;
   division: string;
   status: 'Fresh' | 'Updating' | 'Stale' | 'Offline';
+};
+
+export type Tournament = Event & {
+  city: string;
+  state: string;
+  country: string;
+  level: 'Regional' | 'Signature' | 'State' | 'National' | 'World';
+  teamCount: number;
+  distanceMiles?: number;
+  awards: Array<{
+    name: string;
+    status: 'available' | 'pending' | 'awarded' | 'unknown';
+    qualificationNote: string;
+    winnerTeamNumber?: string;
+  }>;
+  weatherSummary?: string;
+  qualificationSummary: string;
 };
 
 export type Match = {
@@ -66,7 +84,7 @@ export type ScoutingNote = {
   id: string;
   teamNumber: string;
   matchNumber?: string;
-  mode: 'match' | 'pit' | 'super' | 'review';
+  mode: 'match' | 'pit' | 'super' | 'review' | 'photo_video';
   alliance?: 'red' | 'blue';
   tags: string[];
   body: string;
@@ -158,6 +176,20 @@ export type Workspace = {
   syncStatus: Event['status'];
 };
 
+export type AppMode = 'production_empty' | 'developer_mock';
+
+export type AppSettings = {
+  program: 'V5RC' | 'VIQRC' | 'VEX U' | 'VEX AI';
+  season: string;
+  teamNumber: string;
+  teamName: string;
+  school: string;
+  theme: 'dark' | 'light' | 'system';
+  accentColor: string;
+  density: 'compact' | 'comfortable';
+  mockDataEnabled: boolean;
+};
+
 export type User = {
   id: string;
   name: string;
@@ -242,5 +274,38 @@ export type AIInsightMessage = {
 export type RobotProject = {
   id: string;
   name: string;
-  status: 'Ready' | 'Needs calibration' | 'Code warnings';
+  status: 'Ready' | 'Needs repair' | 'Testing' | 'Competition locked' | 'Code issue' | 'Mechanical issue';
+};
+
+export type RobotScanAsset = {
+  id: string;
+  label: 'Front' | 'Back' | 'Left' | 'Right' | 'Top' | 'Close-up' | '360 image' | 'Walkaround video';
+  kind: 'image' | 'video';
+  status: 'needed' | 'uploaded' | 'analyzing' | 'confirmed';
+};
+
+export type RobotPartEstimate = {
+  name: string;
+  sku: string;
+  category: 'Electronics' | 'Motor' | 'Sensor' | 'Structure' | 'Motion' | 'Pneumatics' | 'Fastener' | 'Unknown';
+  quantity: number;
+  unitCostUsd: number;
+  confidence: Confidence;
+  sourceUrl: string;
+  sourceLabel: string;
+  confirmed: boolean;
+};
+
+export type RobotVisionAnalysis = {
+  id: string;
+  projectId: string;
+  status: 'Needs images' | 'Ready to analyze' | 'AI detected parts' | 'Manual confirmation needed' | 'Confirmed';
+  assets: RobotScanAsset[];
+  parts: RobotPartEstimate[];
+  mechanisms: string[];
+  summary: string;
+  totalEstimateUsd: number;
+  confidence: Confidence;
+  dataSources: string[];
+  updatedAt: string;
 };

@@ -2,10 +2,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useState, type MouseEventHandler, type ReactElement, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { aiInsights, event, matches, metrics, predictions, rankings, recommendations, skillsResults, teams, users, workspace } from './data/mockData';
+import { aiInsights, event, matches, metrics, predictions, rankings, recommendations, robotVisionAnalysis, skillsResults, teams, tournaments, users, workspace } from './data/mockData';
 import { api, teamByNumber } from './services/api';
 import { useRoboLabStore } from './store/useRoboLabStore';
-import type { Conversation, Match, Message, PickList, Team } from './types';
+import type { Conversation, Match, Message, PickList, RobotPartEstimate, Team, Tournament } from './types';
 
 type IconProps = { size?: number };
 type IconComponent = (props: IconProps) => ReactElement;
@@ -31,7 +31,6 @@ const Info = makeIcon('i');
 const MessageCircle = makeIcon('MS');
 const MoreHorizontal = makeIcon('...');
 const Plus = makeIcon('+');
-const Rocket = makeIcon('RK');
 const Search = makeIcon('SR');
 const Send = makeIcon('SD');
 const Settings = makeIcon('ST');
@@ -46,24 +45,23 @@ const Zap = makeIcon('MP');
 const nav = [
   { to: '/app', label: 'Home', icon: Home },
   { to: '/app/scout', label: 'Scout', icon: Search },
-  { to: '/app/events', label: 'Events', icon: CalendarDays },
+  { to: '/app/tournaments', label: 'Tourney', icon: Trophy },
+  { to: '/app/robot-lab', label: 'Robot', icon: Bot },
   { to: '/app/messages', label: 'Messages', icon: MessageCircle },
-  { to: '/app/more', label: 'More', icon: MoreHorizontal },
 ];
 
 const desktopNav = [
-  ...nav.slice(0, 3),
+  ...nav,
   { to: '/app/teams/39333Z', label: 'Teams', icon: Users },
   { to: '/app/compare', label: 'Compare', icon: Gauge },
   { to: '/app/alliance', label: 'Alliance', icon: Trophy },
   { to: '/app/coach', label: 'AI Coach', icon: Brain },
-  { to: '/app/messages', label: 'Messages', icon: MessageCircle },
-  { to: '/app/robot-lab', label: 'Robot Lab', icon: Bot },
+  { to: '/app/more', label: 'More', icon: MoreHorizontal },
   { to: '/app/settings', label: 'Settings', icon: Settings },
 ];
 
 const strategies = ['Balanced scoring', 'Strong autonomous', 'Defense-heavy', 'Skills-focused', 'Reliable consistency', 'High-risk high-reward', 'Complement our robot'];
-const noteModes = ['match', 'pit', 'super', 'review'] as const;
+const noteModes = ['match', 'pit', 'super', 'review', 'photo_video'] as const;
 
 function cn(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -80,7 +78,7 @@ function teamLabel(number: string) {
 
 function routeTitle(pathname: string) {
   if (pathname.includes('/scout')) return 'Scout';
-  if (pathname.includes('/events')) return 'Event Center';
+  if (pathname.includes('/events') || pathname.includes('/tournaments')) return 'Tournaments';
   if (pathname.includes('/teams')) return 'Team Profile';
   if (pathname.includes('/compare')) return 'Compare';
   if (pathname.includes('/alliance')) return 'Alliance Builder';
@@ -107,6 +105,8 @@ function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const fab = fabFor(location.pathname);
+  const { appMode, settings, user, signInSkipped, signInWithGoogle, skipSignIn } = useRoboLabStore();
+  const showAuthModal = !user && !signInSkipped;
 
   return (
     <div className="app-shell">
@@ -115,7 +115,7 @@ function AppShell() {
           <div className="brand-mark">RL</div>
           <div>
             <strong>RoboLab</strong>
-            <span>{workspace.teamNumber} command</span>
+            <span>{user ? `${settings.teamNumber || workspace.teamNumber} command` : 'public browse mode'}</span>
           </div>
         </Link>
         <nav>
@@ -141,7 +141,7 @@ function AppShell() {
             <ChevronLeft size={21} />
           </button>
           <div>
-            <p className="eyebrow">VEX V5RC competition assistant</p>
+            <p className="eyebrow">{settings.program} competition assistant</p>
             <h1>{routeTitle(location.pathname)}</h1>
           </div>
           <label className="command-search desktop-only">
@@ -150,6 +150,7 @@ function AppShell() {
           </label>
           <div className="top-actions">
             <Pill tone={workspace.syncStatus === 'Fresh' ? 'success' : 'warn'}>{workspace.syncStatus}</Pill>
+            <Pill tone={appMode === 'developer_mock' ? 'orange' : 'cyan'}>{appMode === 'developer_mock' ? 'Mock dev' : 'No fake data'}</Pill>
             <button className="icon-button" aria-label="Notifications">
               <Bell size={18} />
             </button>
@@ -162,6 +163,7 @@ function AppShell() {
               <Routes>
                 <Route index element={<HomeDashboard />} />
                 <Route path="scout" element={<ScoutSearch />} />
+                <Route path="tournaments" element={<TournamentsPage />} />
                 <Route path="events" element={<EventCenter />} />
                 <Route path="events/:id" element={<EventCenter />} />
                 <Route path="teams/:number" element={<TeamProfile />} />
@@ -193,6 +195,29 @@ function AppShell() {
           </NavLink>
         ))}
       </nav>
+      {showAuthModal ? <AuthModal onGoogle={signInWithGoogle} onSkip={skipSignIn} /> : null}
+    </div>
+  );
+}
+
+function AuthModal({ onGoogle, onSkip }: { onGoogle: () => void; onSkip: () => void }) {
+  return (
+    <div className="modal-backdrop auth-backdrop">
+      <Card className="auth-modal">
+        <div className="brand-mark large">RL</div>
+        <SectionHeader title="Welcome to RoboLab" eyebrow="Sign in to sync team data, messages, and robot status" />
+        <p className="body-copy">Continue with Google to create or join a workspace. Skip mode lets you browse public/searchable data, but messaging, robot uploads, note sync, and workspace sharing stay locked.</p>
+        <div className="auth-capabilities">
+          <span>Server-side RobotEvents</span>
+          <span>Workspace-only messages</span>
+          <span>Offline scouting queue</span>
+          <span>AI robot part audit</span>
+        </div>
+        <div className="button-row">
+          <button className="primary-button full" onClick={onGoogle}>Continue with Google</button>
+          <button className="secondary-button full" onClick={onSkip}>Skip for now</button>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -316,7 +341,7 @@ function MatchCard({ match }: { match: Match }) {
 }
 
 function HomeDashboard() {
-  const { favorites, notes } = useRoboLabStore();
+  const { appMode, user, settings, favorites, notes } = useRoboLabStore();
   const favoriteTeams = favorites.map(getTeam);
   const nextMatch = matches.find((match) => match.red.includes(workspace.teamNumber) || match.blue.includes(workspace.teamNumber)) ?? matches[12];
   const unsynced = notes.filter((note) => note.syncState !== 'synced').length;
@@ -325,9 +350,9 @@ function HomeDashboard() {
     <div className="screen-grid">
       <Card className="hero-card">
         <div>
-          <Pill tone="cyan">{workspace.syncStatus} data</Pill>
-          <h2>{workspace.teamNumber} {workspace.teamName}</h2>
-          <p>{event.name} · {event.venue}</p>
+          <Pill tone="cyan">{appMode === 'developer_mock' ? 'Developer mock mode' : 'Production empty mode'}</Pill>
+          <h2>{user ? `${settings.teamNumber || workspace.teamNumber} ${settings.teamName || workspace.teamName}` : 'RoboLab command center'}</h2>
+          <p>{user ? `${event.name} · ${event.venue}` : 'Search official teams and tournaments, then sign in to sync scouting, robot status, and messages.'}</p>
         </div>
         <div className="hero-score">
           <strong>{unsynced}</strong>
@@ -371,6 +396,11 @@ function HomeDashboard() {
         </div>
       </Card>
 
+      <Card>
+        <SectionHeader title="Data honesty" eyebrow="Production rule" action={<Pill tone={appMode === 'developer_mock' ? 'orange' : 'success'}>{appMode === 'developer_mock' ? 'Mock data visible' : 'No mock data'}</Pill>} />
+        <p className="body-copy">RoboLab production starts empty for new users. Official charts and tournament data must come from server-side RobotEvents cache plus saved scouting notes. When data is missing, the app shows setup, retry, stale, or offline states instead of made-up numbers.</p>
+      </Card>
+
       <div className="dashboard-grid">
         <Card>
           <SectionHeader title="Favorite teams" />
@@ -397,6 +427,7 @@ function HomeDashboard() {
 function ScoutSearch() {
   const [query, setQuery] = useState('');
   const filtered = teams.filter((team) => `${team.number} ${team.name} ${team.organization} ${team.region}`.toLowerCase().includes(query.toLowerCase()));
+  const eventMatches = tournaments.filter((tournament) => `${tournament.name} ${tournament.sku} ${tournament.city} ${tournament.state} ${tournament.program}`.toLowerCase().includes(query.toLowerCase()));
   const { isLoading, isError } = useQuery({ queryKey: ['team-search', query], queryFn: () => api.teams.search(query) });
 
   return (
@@ -407,8 +438,18 @@ function ScoutSearch() {
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search team number, name, school, region" />
         </label>
         <div className="chip-row">
-          {['V5RC', '2025-2026', 'Singapore', event.name, event.division].map((filter) => <Pill key={filter}>{filter}</Pill>)}
+          {['V5RC', 'VIQRC', 'VEX U', 'VEX AI', '2026-2027', 'Search city', 'Search school'].map((filter) => <Pill key={filter}>{filter}</Pill>)}
         </div>
+        {query ? (
+          <div className="autocomplete-panel">
+            {[...filtered.slice(0, 4).map((team) => ({ id: team.number, label: `${team.number} - ${team.name}`, meta: `${team.organization} · ${team.region}`, to: `/app/teams/${team.number}` })), ...eventMatches.slice(0, 3).map((tournament) => ({ id: tournament.id, label: tournament.name, meta: `${tournament.sku} · ${tournament.city}, ${tournament.state}`, to: '/app/tournaments' }))].map((item) => (
+              <Link key={item.id} to={item.to}>
+                <strong>{item.label}</strong>
+                <span>{item.meta}</span>
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </Card>
       <div className="three-column">
         <Card>
@@ -432,6 +473,116 @@ function ScoutSearch() {
       <StateStrip />
     </div>
   );
+}
+
+function TournamentsPage() {
+  const [query, setQuery] = useState('');
+  const [program, setProgram] = useState('All');
+  const filtered = tournaments.filter((tournament) => {
+    const queryMatch = `${tournament.name} ${tournament.sku} ${tournament.city} ${tournament.state} ${tournament.level}`.toLowerCase().includes(query.toLowerCase());
+    const programMatch = program === 'All' || tournament.program === program;
+    return queryMatch && programMatch;
+  });
+
+  return (
+    <div className="screen-grid">
+      <Card className="event-hero">
+        <div>
+          <Pill tone="cyan">New bottom tab</Pill>
+          <h2>Tournaments</h2>
+          <p>Browse official event shells, scout coverage, awards, maps, weather, rankings, skills, and AI tournament Q&A.</p>
+        </div>
+        <Pill tone="orange">No qualification claims without official data</Pill>
+      </Card>
+      <Card className="search-panel">
+        <label className="big-search">
+          <Search size={22} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tournament name, SKU, city, state, program" />
+        </label>
+        <div className="tabs compact">
+          {['All', 'V5RC', 'VIQRC', 'VEX U', 'VEX AI'].map((item) => <button className={cn(program === item && 'active')} key={item} onClick={() => setProgram(item)}>{item}</button>)}
+        </div>
+      </Card>
+      <div className="tournament-layout">
+        <div className="tournament-list">
+          {filtered.map((tournament) => <TournamentCard key={tournament.id} tournament={tournament} />)}
+          {!filtered.length ? <EmptyDataCard title="No tournaments found" copy="Try another city, SKU, program, or date range. RoboLab will not invent events when official data is unavailable." /> : null}
+        </div>
+        <Card>
+          <SectionHeader title="Tournament AI" eyebrow="Grounded in event records" action={<Pill tone="cyan">Cites data</Pill>} />
+          <div className="ai-card">
+            <Sparkles size={19} />
+            <div>
+              <strong>Ask what to scout next</strong>
+              <p>RoboLab answers from fetched tournament teams, rankings, skills, awards, matches, and your workspace notes. If the official source is stale, it says so before recommending action.</p>
+              <div className="compact-list">
+                <button>Which teams need scout coverage?</button>
+                <button>What awards are confirmed?</button>
+                <button>Who should we watch before alliance selection?</button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+      <StateStrip />
+    </div>
+  );
+}
+
+function TournamentCard({ tournament }: { tournament: Tournament }) {
+  const statusTone = tournament.status === 'Fresh' ? 'success' : tournament.status === 'Updating' ? 'cyan' : tournament.status === 'Stale' ? 'warn' : 'danger';
+  return (
+    <Card className="tournament-card">
+      <div className="date-tile">
+        <strong>{new Date(`${tournament.date}T12:00:00`).toLocaleDateString('en', { month: 'short' })}</strong>
+        <span>{new Date(`${tournament.date}T12:00:00`).getDate()}</span>
+      </div>
+      <div>
+        <div className="tournament-title">
+          <div>
+            <strong>{tournament.name}</strong>
+            <span>{tournament.sku} · {tournament.program} · {tournament.level}</span>
+          </div>
+          <Pill tone={statusTone}>{tournament.status}</Pill>
+        </div>
+        <p>{tournament.venue} · {tournament.city}, {tournament.state} · {tournament.teamCount} teams</p>
+        <div className="tournament-sections">
+          <div><strong>Location</strong><span>{tournament.weatherSummary ?? 'Weather unavailable until API key is configured.'}</span></div>
+          <div><strong>Teams</strong><span>Favorites and scout coverage can be assigned from team list.</span></div>
+          <div><strong>Awards</strong><span>{tournament.qualificationSummary}</span></div>
+        </div>
+        <div className="award-list">
+          {tournament.awards.map((award) => (
+            <div key={award.name}>
+              <strong>{award.name}</strong>
+              <Pill tone={award.status === 'awarded' ? 'success' : award.status === 'pending' ? 'warn' : 'default'}>{award.status}</Pill>
+              <span>{award.qualificationNote}</span>
+            </div>
+          ))}
+        </div>
+        <div className="button-row">
+          <Link className="secondary-button" to="/app/events">Open Event Center</Link>
+          <Link className="secondary-button" to="/app/notes">Assign Scouts</Link>
+          <Link className="primary-button" to="/app/coach">Ask Tournament AI</Link>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function EmptyDataCard({ title, copy }: { title: string; copy: string }) {
+  return (
+    <Card className="empty-card">
+      <CircleIcon label="!" />
+      <strong>{title}</strong>
+      <p>{copy}</p>
+      <button className="secondary-button">Retry official data</button>
+    </Card>
+  );
+}
+
+function CircleIcon({ label }: { label: string }) {
+  return <span className="circle-icon">{label}</span>;
 }
 
 function EventCenter() {
@@ -767,11 +918,33 @@ function ConversationAvatar({ conversation }: { conversation: Conversation }) {
 }
 
 function MessagesPage() {
-  const { conversations, messages, activeConversationId, setActiveConversation, sendMessage, createConversation } = useRoboLabStore();
+  const { user, conversations, messages, activeConversationId, setActiveConversation, sendMessage, createConversation } = useRoboLabStore();
   const [draft, setDraft] = useState('');
   const [showNew, setShowNew] = useState(false);
   const active = conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0];
   const thread = messages.filter((message) => message.conversationId === active.id);
+
+  if (!user) {
+    return (
+      <div className="screen-grid">
+        <Card className="hero-card">
+          <div>
+            <Pill tone="warn">Google required</Pill>
+            <h2>Messages are workspace-only</h2>
+            <p>Sign in to message approved teammates, share scout notes, pin AI strategy cards, and keep robot updates private to your workspace.</p>
+          </div>
+        </Card>
+        <Card>
+          <SectionHeader title="Privacy rules" eyebrow="No public random DMs" />
+          <div className="settings-list">
+            <div><strong>Workspace members only</strong><span>Direct and group chats stay inside approved RoboLab workspaces.</span><Pill tone="blue">Private</Pill></div>
+            <div><strong>Coach moderation</strong><span>Owners/coaches can remove inappropriate content and disable messaging.</span><Pill tone="cyan">Ready</Pill></div>
+            <div><strong>Shared cards</strong><span>Team, match, scout note, robot status, and pick-list cards can be sent after sign-in.</span><Pill tone="warn">Locked</Pill></div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   function send() {
     if (!draft.trim()) return;
@@ -877,7 +1050,8 @@ function MorePage() {
   const items = [
     ['/app/coach', 'AI Coach', Brain, 'Ask strategy questions grounded in workspace data.'],
     ['/app/messages', 'Messages', MessageCircle, 'Team chat, match strategy, AI summaries.'],
-    ['/app/robot-lab', 'Robot Lab', Bot, 'Code upload, simulator, calibrator, path planner.'],
+    ['/app/robot-lab', 'Robot Lab', Bot, '360 image/video scan, official VEX parts budget, code review, path planner.'],
+    ['/app/tournaments', 'Tournaments', Trophy, 'Official event center, awards, maps, weather, scout coverage.'],
     ['/app/predict', 'Match Predictor', Zap, 'Win probability and strategy suggestions.'],
     ['/app/alliance', 'Alliance Builder', Trophy, 'Transparent compatibility and pick tiers.'],
     ['/app/settings', 'Settings', Settings, 'Google identity, workspace privacy, sync controls.'],
@@ -892,27 +1066,87 @@ function MorePage() {
 }
 
 function RobotLab() {
+  const { user } = useRoboLabStore();
+  const [selectedPart, setSelectedPart] = useState<RobotPartEstimate | null>(robotVisionAnalysis.parts[0]);
+  const total = robotVisionAnalysis.parts.reduce((sum, part) => sum + part.quantity * part.unitCostUsd, 0);
   const tools = [
-    ['Robot Projects', 'Track build versions, robot dimensions, and code packages.', Bot],
-    ['Code Upload', 'Upload VEXcode files and detect motors, ports, sensors, and risky changes.', Code2],
-    ['Dimension Calibrator', 'Enter wheelbase, wheel size, gear ratios, and turn constants.', Gauge],
-    ['Field Path Planner', 'Draw autonomous paths and convert them into VEXcode-ready routines.', Compass],
-    ['Simulator', 'Preview autonomous motion on V5RC-style fields with clear scoring zones.', Rocket],
-    ['Troubleshooting AI', 'Diagnose drivetrain drift, motor wiring, auton misses, and sensor failures.', Wrench],
+    ['Robot Projects', 'Versions, status, images, confirmed dimensions, code packages, and readiness history.', Bot],
+    ['360 Vision Audit', 'Upload 8-16 photos, a 360 image, or a slow walkaround video for AI part detection.', Search],
+    ['Official Parts Budget', 'Map confirmed labels to VEX product pages, CAD links, quantities, and editable costs.', Gauge],
+    ['Code Upload', 'Parse VEXcode safely, detect motors/sensors/ports, and review patches before changes.', Code2],
+    ['Path Planner', 'Draw autonomous routes and export only through a reviewable C++/Python diff.', Compass],
+    ['Troubleshooting AI', 'Diagnose drivetrain drift, wiring, auton misses, and mechanism reliability.', Wrench],
   ] as const;
   return (
     <div className="screen-grid">
       <Card className="hero-card">
-        <div><Pill tone="orange">Future expansion</Pill><h2>Robot Lab</h2><p>Robot tools are connected to scouting decisions, match strategy, and code review approvals.</p></div>
+        <div><Pill tone="orange">Merged Scout-Master + RoboLab</Pill><h2>Robot Lab</h2><p>Upload robot photos or video, let AI identify likely VEX parts from official libraries, then manually confirm labels before budget or CAD records are saved.</p></div>
+        <Pill tone={user ? 'success' : 'warn'}>{user ? 'Workspace sync unlocked' : 'Sign in required to save'}</Pill>
       </Card>
-      <div className="tool-grid">{tools.map(([title, copy, Icon]) => <Card className="robot-tool" key={title}><Icon size={24} /><strong>{title}</strong><p>{copy}</p><button className="secondary-button">Open</button></Card>)}</div>
-      <Card className="field-preview">
-        <div className="field-surface">
-          <div className="field-zone blue">Blue goal zone</div>
-          <div className="field-zone red">Red goal zone</div>
-          <div className="robot-preview"><span />V5 drivetrain preview</div>
-          <svg viewBox="0 0 500 260" aria-hidden="true"><path d="M60 210 C150 120 260 150 420 50" /></svg>
+      <div className="tool-grid">{tools.map(([title, copy, Icon]) => <Card className="robot-tool" key={title}><Icon size={24} /><strong>{title}</strong><p>{copy}</p><button className="secondary-button">{title === '360 Vision Audit' ? 'Start scan' : 'Open'}</button></Card>)}</div>
+      <div className="robot-vision-layout">
+        <Card className="scan-card">
+          <SectionHeader title="Robot vision capture" eyebrow="No 360 simulator" action={<Pill tone={robotVisionAnalysis.confidence === 'High' ? 'success' : 'warn'}>{robotVisionAnalysis.confidence} confidence</Pill>} />
+          <div className="capture-stage">
+            <div className="robot-photo-frame">
+              <div className="robot-silhouette">
+                <span className="brain-block">Brain</span>
+                <span className="motor-block left">Motor</span>
+                <span className="motor-block right">Motor</span>
+                <span className="intake-block">Intake</span>
+                <span className="battery-block">Battery</span>
+              </div>
+            </div>
+            <div className="capture-steps">
+              {robotVisionAnalysis.assets.map((asset) => (
+                <button key={asset.id} className={cn('capture-step', asset.status)}>
+                  <strong>{asset.label}</strong>
+                  <span>{asset.kind} · {asset.status}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="button-row">
+            <label className="primary-button file-button">
+              Upload images/video
+              <input type="file" accept="image/*,video/*" multiple />
+            </label>
+            <button className="secondary-button">Run blur/lighting check</button>
+            <button className="secondary-button">Manual start</button>
+          </div>
+        </Card>
+        <Card>
+          <SectionHeader title="AI part breakdown" eyebrow="Confirm before saving" action={<Pill tone="cyan">${total.toFixed(2)} estimate</Pill>} />
+          <p className="body-copy">{robotVisionAnalysis.summary}</p>
+          <div className="part-table">
+            {robotVisionAnalysis.parts.map((part) => (
+              <button key={part.sku} className={cn('part-row', selectedPart?.sku === part.sku && 'active')} onClick={() => setSelectedPart(part)}>
+                <span><strong>{part.name}</strong><small>{part.sku} · {part.category}</small></span>
+                <b>x{part.quantity}</b>
+                <em>${(part.unitCostUsd * part.quantity).toFixed(2)}</em>
+                <Pill tone={part.confirmed ? 'success' : part.confidence === 'Low' ? 'warn' : 'cyan'}>{part.confirmed ? 'confirmed' : part.confidence}</Pill>
+              </button>
+            ))}
+          </div>
+          {selectedPart ? (
+            <div className="selected-part">
+              <strong>{selectedPart.name}</strong>
+              <p>Source: <a href={selectedPart.sourceUrl} target="_blank" rel="noreferrer">{selectedPart.sourceLabel}</a>. Prices are rough and must be refreshed server-side before purchasing.</p>
+              <div className="button-row">
+                <button className="primary-button">Confirm label</button>
+                <button className="secondary-button">Edit quantity</button>
+                <button className="secondary-button">Open CAD source</button>
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      </div>
+      <Card>
+        <SectionHeader title="Model/CAD workflow" eyebrow="AI + manual review" />
+        <div className="workflow-steps">
+          {['Capture', 'Detect parts', 'Confirm labels', 'Build CAD-style tree', 'Estimate cost', 'Share to workspace'].map((step, index) => <div key={step}><b>{index + 1}</b><span>{step}</span></div>)}
         </div>
+        <p className="body-copy">RoboLab does not pretend the scan is exact. Low-confidence labels are routed to manual confirmation, and generated code/CAD changes require review before they can affect the robot project.</p>
       </Card>
       <StateStrip />
     </div>
@@ -920,15 +1154,52 @@ function RobotLab() {
 }
 
 function SettingsPage() {
+  const { user, settings, signInWithGoogle, signOut, updateSettings, appMode } = useRoboLabStore();
+  const accentColors = ['#4F7FFF', '#22C55E', '#F59E0B', '#A855F7', '#00D4FF', '#FF4455'];
   return (
     <div className="screen-grid">
       <Card>
-        <SectionHeader title="Workspace identity" eyebrow="Google Auth ready" />
+        <SectionHeader title="Workspace identity" eyebrow="Google Auth ready" action={<button className="primary-button" onClick={user ? signOut : signInWithGoogle}>{user ? 'Sign out' : 'Continue with Google'}</button>} />
         <div className="settings-list">
-          <div><strong>Signed in as Shervin</strong><span>Verified Google identity, email hidden from normal chat UI.</span><Pill tone="success">Connected</Pill></div>
+          <div><strong>{user ? `Signed in as ${user.name}` : 'Skipped sign-in'}</strong><span>Verified Google identity unlocks workspace sync. Email stays hidden from normal chat UI.</span><Pill tone={user ? 'success' : 'warn'}>{user ? 'Connected' : 'Browse only'}</Pill></div>
           <div><strong>{workspace.name}</strong><span>Members can only message approved workspace teammates.</span><Pill tone="blue">Private</Pill></div>
-          <div><strong>RobotEvents adapter</strong><span>API tokens stay server-side and cached. Frontend never receives keys.</span><Pill tone="success">Protected</Pill></div>
+          <div><strong>App mode</strong><span>Production starts empty. Developer mock mode is visibly labeled and can be disabled by environment.</span><Pill tone={appMode === 'developer_mock' ? 'orange' : 'success'}>{appMode}</Pill></div>
           <div><strong>Messaging moderation</strong><span>Owners and coaches can remove inappropriate messages and disable messaging.</span><Pill tone="cyan">Enabled</Pill></div>
+        </div>
+      </Card>
+      <Card>
+        <SectionHeader title="Team setup" eyebrow="Optional but sync-ready" />
+        <div className="control-grid">
+          <label><span>Program</span><select value={settings.program} onChange={(event) => updateSettings({ program: event.target.value as typeof settings.program })}>{['V5RC', 'VIQRC', 'VEX U', 'VEX AI'].map((program) => <option key={program}>{program}</option>)}</select></label>
+          <label><span>Season</span><input value={settings.season} onChange={(event) => updateSettings({ season: event.target.value })} /></label>
+          <label><span>Team number</span><input value={settings.teamNumber} onChange={(event) => updateSettings({ teamNumber: event.target.value })} placeholder="8059A" /></label>
+          <label><span>School / organization</span><input value={settings.school} onChange={(event) => updateSettings({ school: event.target.value })} placeholder="Optional" /></label>
+        </div>
+      </Card>
+      <Card>
+        <SectionHeader title="Theme and profile" eyebrow="Saved to account later" />
+        <div className="settings-split">
+          <div>
+            <strong>Accent palette</strong>
+            <div className="swatch-row">{accentColors.map((color) => <button key={color} className={cn('swatch', settings.accentColor === color && 'active')} style={{ background: color }} onClick={() => updateSettings({ accentColor: color })} aria-label={`Use accent ${color}`} />)}</div>
+          </div>
+          <div>
+            <strong>Preset avatars</strong>
+            <div className="avatar-row">{['SS', 'TM', 'AI', 'V5', 'DR', 'CO'].map((avatar) => <span className="avatar small" key={avatar}>{avatar}</span>)}</div>
+          </div>
+        </div>
+      </Card>
+      <Card>
+        <SectionHeader title="API diagnostics" eyebrow="Secrets stay server-side" />
+        <div className="settings-list">
+          {[
+            ['RobotEvents', 'ROBOT_EVENTS_API_TOKEN / ROBOTEVENTS_API_TOKEN', 'Tests official teams, matches, rankings, skills, and awards through backend cache.'],
+            ['Auth', 'GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET', 'Required for workspace sync and messages.'],
+            ['Database', 'DATABASE_URL / SUPABASE_URL / SERVICE_ROLE_KEY', 'Stores notes, messages, robot status, and confirmed parts.'],
+            ['AI', 'OPENAI_API_KEY / GEMINI_API_KEY / AI_DEFAULT_PROVIDER', 'Powers coach, tournament assistant, scout helper, robot scan, and code warnings.'],
+            ['Uploads', 'UPLOAD_BUCKET / MAX_IMAGE_MB / REMOVE_IMAGE_EXIF', 'Stores robot images and removes EXIF by default.'],
+            ['Widgets', 'WEATHER_API_KEY / MAPS_API_KEY', 'Adds tournament map and weather widgets.'],
+          ].map(([name, vars, copy]) => <div key={name}><strong>{name}</strong><span>{vars}: {copy}</span><Pill tone="cyan">Server route</Pill></div>)}
         </div>
       </Card>
       <StateStrip />

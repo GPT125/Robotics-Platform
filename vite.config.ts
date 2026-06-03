@@ -161,6 +161,8 @@ function platformApi(mode: string): Plugin {
       '/api/messages/ai/strategy',
       '/api/messages/ai/picklist',
       '/api/messages/mark-read',
+      '/api/robot-lab/analyze',
+      '/api/robot-lab/parts/confirm',
     ];
     const isMessagesMutation = /^\/api\/messages\/[^/]+\/(reactions|pin)$/.test(path) || /^\/api\/messages\/conversations\/[^/]+\/messages$/.test(path);
     const isMessageItem = /^\/api\/messages\/[^/]+$/.test(path);
@@ -169,10 +171,12 @@ function platformApi(mode: string): Plugin {
       '/api/messages/conversations',
     ];
     const isEventDetail = /^\/api\/events\/[^/]+(\/matches|\/rankings|\/skills)?$/.test(path);
+    const isTournamentSearch = /^\/api\/tournaments(\/search)?$/.test(path);
     const isTeamDetail = /^\/api\/teams\/[^/]+$/.test(path);
+    const isRobotLab = /^\/api\/robot-lab\/(parts-catalog|projects|status)$/.test(path);
     const isConversationDetail = /^\/api\/messages\/conversations\/[^/]+(\/messages)?$/.test(path);
 
-    if (!(getRoutes.includes(path) || postRoutes.includes(path) || isEventDetail || isTeamDetail || isConversationDetail || isMessagesMutation || isMessageItem)) return false;
+    if (!(getRoutes.includes(path) || postRoutes.includes(path) || isEventDetail || isTournamentSearch || isTeamDetail || isRobotLab || isConversationDetail || isMessagesMutation || isMessageItem)) return false;
 
     const body = req.method === 'POST' || req.method === 'PATCH' ? await readJsonBody(req) : {};
     res.setHeader('Content-Type', 'application/json');

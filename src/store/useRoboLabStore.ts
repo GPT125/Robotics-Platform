@@ -1,8 +1,12 @@
 import { create } from 'zustand';
 import { conversations as seedConversations, messages as seedMessages, notes as seedNotes, pickList as seedPickList, teams } from '../data/mockData';
-import type { Conversation, Message, PickList, ScoutingNote } from '../types';
+import type { AppMode, AppSettings, Conversation, Message, PickList, ScoutingNote, User } from '../types';
 
 type RoboLabState = {
+  appMode: AppMode;
+  user: User | null;
+  signInSkipped: boolean;
+  settings: AppSettings;
   favorites: string[];
   compareTeams: string[];
   pickList: PickList;
@@ -10,6 +14,10 @@ type RoboLabState = {
   conversations: Conversation[];
   messages: Message[];
   activeConversationId: string;
+  signInWithGoogle: () => void;
+  skipSignIn: () => void;
+  signOut: () => void;
+  updateSettings: (updates: Partial<AppSettings>) => void;
   toggleFavorite: (teamNumber: string) => void;
   addCompareTeam: (teamNumber: string) => void;
   addNote: (note: ScoutingNote) => void;
@@ -20,6 +28,20 @@ type RoboLabState = {
 };
 
 export const useRoboLabStore = create<RoboLabState>((set) => ({
+  appMode: import.meta.env.DEV ? 'developer_mock' : 'production_empty',
+  user: null,
+  signInSkipped: false,
+  settings: {
+    program: 'V5RC',
+    season: '2026-2027',
+    teamNumber: '',
+    teamName: '',
+    school: '',
+    theme: 'dark',
+    accentColor: '#4F7FFF',
+    density: 'comfortable',
+    mockDataEnabled: import.meta.env.DEV,
+  },
   favorites: ['39333Z', '13888A', '123A'],
   compareTeams: ['39333Z', '123A', '315R'],
   pickList: seedPickList,
@@ -27,6 +49,31 @@ export const useRoboLabStore = create<RoboLabState>((set) => ({
   conversations: seedConversations,
   messages: seedMessages,
   activeConversationId: 'c1',
+  signInWithGoogle: () =>
+    set({
+      signInSkipped: false,
+      user: {
+        id: 'google-local-user',
+        name: 'Team Member',
+        email: 'hidden-in-chat@example.com',
+        avatarUrl: 'TM',
+        lastSeenAt: 'online',
+      },
+      settings: {
+        program: 'V5RC',
+        season: '2026-2027',
+        teamNumber: '8059A',
+        teamName: 'Blank.',
+        school: 'RoboLab Workspace',
+        theme: 'dark',
+        accentColor: '#4F7FFF',
+        density: 'comfortable',
+        mockDataEnabled: import.meta.env.DEV,
+      },
+    }),
+  skipSignIn: () => set({ signInSkipped: true }),
+  signOut: () => set({ user: null, signInSkipped: false }),
+  updateSettings: (updates) => set((state) => ({ settings: { ...state.settings, ...updates } })),
   toggleFavorite: (teamNumber) =>
     set((state) => ({
       favorites: state.favorites.includes(teamNumber) ? state.favorites.filter((number) => number !== teamNumber) : [...state.favorites, teamNumber],
