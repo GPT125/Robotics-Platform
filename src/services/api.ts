@@ -94,3 +94,79 @@ export const api = {
 export function teamByNumber(number: string): Team {
   return teams.find((team) => team.number === number) ?? teams[0];
 }
+
+// ---- Real server-backed AI Coach (keys stay server-side in vite.config) ----
+export type CoachSource = { title: string; url: string; blurb: string };
+export type CoachChatMessage = { role: 'user' | 'assistant'; content: string };
+export type CoachResponse = {
+  answer: string;
+  provider: string;
+  model: string | null;
+  confidence: 'High' | 'Medium' | 'Low';
+  sources: CoachSource[];
+  models?: string[];
+  hasVision?: boolean;
+  dataSources: string[];
+};
+
+export async function askCoach(input: { messages: CoachChatMessage[]; context?: string; images?: string[] }): Promise<CoachResponse> {
+  const response = await fetch('/api/ai/coach', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const json = (await response.json().catch(() => ({}))) as { ok?: boolean; data?: CoachResponse; error?: { message?: string } };
+  if (!response.ok || !json.ok || !json.data) {
+    throw new Error(json.error?.message ?? `Coach request failed (${response.status})`);
+  }
+  return json.data;
+}
+
+export type IntegrationStatus = { key: string; feature: string; configured: boolean };
+
+export async function fetchIntegrationStatus(): Promise<IntegrationStatus[]> {
+  const response = await fetch('/api/integrations/status');
+  const json = (await response.json().catch(() => ({}))) as { ok?: boolean; data?: IntegrationStatus[] };
+  if (!response.ok || !json.ok || !json.data) throw new Error(`Status request failed (${response.status})`);
+  return json.data;
+}
+
+export type GoogleAuthStatus = {
+  configured: boolean;
+  clientIdConfigured: boolean;
+  clientSecretConfigured: boolean;
+  redirectUriConfigured: boolean;
+};
+
+export type GoogleAuthSession = {
+  email: string;
+  name: string;
+  avatarUrl: string;
+  lastSeenAt: string;
+};
+
+export async function fetchGoogleAuthStatus(): Promise<GoogleAuthStatus> {
+  const response = await fetch('/api/auth/google/status');
+  const json = (await response.json().catch(() => ({}))) as { ok?: boolean; data?: GoogleAuthStatus };
+  if (!response.ok || !json.ok || !json.data) throw new Error(`Google auth status failed (${response.status})`);
+  return json.data;
+}
+
+export async function startGoogleAuth(email?: string): Promise<boolean> {
+  try {
+    const status = await fetchGoogleAuthStatus();
+    if (!status.configured) return false;
+    const query = email ? `?email=${encodeURIComponent(email)}` : '';
+    window.location.assign(`/api/auth/google/start${query}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchGoogleAuthSession(): Promise<GoogleAuthSession | null> {
+  const response = await fetch('/api/auth/google/session');
+  const json = (await response.json().catch(() => ({}))) as { ok?: boolean; data?: GoogleAuthSession | null };
+  if (!response.ok || !json.ok) return null;
+  return json.data ?? null;
+}

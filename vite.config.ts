@@ -1,6 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 
-type ServerReq = { url?: string; method?: string; on: (event: string, callback: (chunk?: Buffer) => void) => void };
+type ServerReq = { url?: string; method?: string; headers?: Record<string, string | string[] | undefined>; on: (event: string, callback: (chunk?: Buffer) => void) => void };
 type ServerRes = { statusCode: number; setHeader: (key: string, value: string) => void; end: (body: string) => void };
 
 function configured(value: string | undefined) {
@@ -30,32 +30,48 @@ async function readJsonBody(req: ServerReq) {
 
 function integrationRows(env: Record<string, string>) {
   return [
-    ['ROBOTEVENTS_API_TOKEN', 'Live events, teams, and matches'],
-    ['GROQ_API_KEY', 'Fast AI coach'],
-    ['DEEPSEEK_API_KEY', 'Code and reasoning reviewer'],
-    ['HUGGINGFACE_API_KEY', 'Open-model second opinion'],
-    ['OPENROUTER_API_KEY', 'Model-router strategy reviewer'],
-    ['OPENAI_API_KEY', 'Optional OpenAI reviewer when configured'],
-    ['NEWS_API_KEY', 'Sponsor and robotics news signals'],
-    ['MARKETAUX_API_KEY', 'Market/news signals for sponsor research'],
-    ['FINNHUB_API_KEY', 'Sponsor ticker research'],
-    ['ALPHA_VANTAGE_API_KEY', 'Sponsor ticker research'],
-    ['FMP_API_KEY', 'Sponsor financial profile research'],
-    ['EOD_API_KEY', 'Sponsor market data research'],
-    ['FRED_API_KEY', 'Regional economic context for grants'],
-    ['VITE_GOOGLE_CLIENT_ID', 'Future Google Drive import UI'],
-    ['GOOGLE_CLIENT_ID', 'Server-side Google integration'],
-    ['GOOGLE_CLIENT_SECRET', 'Server-side Google integration'],
-    ['SUPABASE_SERVICE_ROLE_KEY', 'Server-side database admin integration'],
-    ['VITE_SUPABASE_URL', 'Browser Supabase client'],
-    ['VITE_SUPABASE_ANON_KEY', 'Browser Supabase client'],
-    ['DATABASE_URL', 'Server persistence'],
-    ['STORAGE_BUCKET', 'Robot code and CAD storage'],
-  ].map(([key, feature]) => ({ key, feature, configured: configured(env[key]) }));
+    { key: 'ROBOTEVENTS_API_TOKEN', feature: 'Live events, teams, and matches', configured: configured(env.ROBOTEVENTS_API_TOKEN) || configured(env.ROBOT_EVENTS_API_TOKEN) },
+    { key: 'ROBOT_EVENTS_API_TOKEN', feature: 'RobotEvents token alias', configured: configured(env.ROBOT_EVENTS_API_TOKEN) || configured(env.ROBOTEVENTS_API_TOKEN) },
+    { key: 'ROBOTEVENTS_BASE_URL', feature: 'RobotEvents API base URL override', configured: configured(env.ROBOTEVENTS_BASE_URL) },
+    { key: 'ROBOTEVENTS_CACHE_TTL_SECONDS', feature: 'RobotEvents cache freshness', configured: configured(env.ROBOTEVENTS_CACHE_TTL_SECONDS) },
+    { key: 'GROQ_API_KEY', feature: 'Fast AI coach', configured: configured(env.GROQ_API_KEY) },
+    { key: 'DEEPSEEK_API_KEY', feature: 'Code and reasoning reviewer', configured: configured(env.DEEPSEEK_API_KEY) },
+    { key: 'HUGGINGFACE_API_KEY', feature: 'Open-model second opinion', configured: configured(env.HUGGINGFACE_API_KEY) },
+    { key: 'OPENROUTER_API_KEY', feature: 'Model-router strategy reviewer', configured: configured(env.OPENROUTER_API_KEY) },
+    { key: 'OPENAI_API_KEY', feature: 'Optional OpenAI reviewer when configured', configured: configured(env.OPENAI_API_KEY) },
+    { key: 'GEMINI_API_KEY', feature: 'Optional Gemini reviewer when configured', configured: configured(env.GEMINI_API_KEY) },
+    { key: 'NEWS_API_KEY', feature: 'Sponsor and robotics news signals', configured: configured(env.NEWS_API_KEY) },
+    { key: 'MARKETAUX_API_KEY', feature: 'Market/news signals for sponsor research', configured: configured(env.MARKETAUX_API_KEY) },
+    { key: 'FINNHUB_API_KEY', feature: 'Sponsor ticker research', configured: configured(env.FINNHUB_API_KEY) },
+    { key: 'ALPHA_VANTAGE_API_KEY', feature: 'Sponsor ticker research', configured: configured(env.ALPHA_VANTAGE_API_KEY) },
+    { key: 'FMP_API_KEY', feature: 'Sponsor financial profile research', configured: configured(env.FMP_API_KEY) },
+    { key: 'EOD_API_KEY', feature: 'Sponsor market data research', configured: configured(env.EOD_API_KEY) },
+    { key: 'FRED_API_KEY', feature: 'Regional economic context for grants', configured: configured(env.FRED_API_KEY) },
+    { key: 'VITE_GOOGLE_CLIENT_ID', feature: 'Browser Google identity bootstrap', configured: configured(env.VITE_GOOGLE_CLIENT_ID) || configured(env.GOOGLE_CLIENT_ID) },
+    { key: 'GOOGLE_CLIENT_ID', feature: 'Server-side Google integration', configured: configured(env.GOOGLE_CLIENT_ID) || configured(env.VITE_GOOGLE_CLIENT_ID) },
+    { key: 'GOOGLE_CLIENT_SECRET', feature: 'Server-side Google integration', configured: configured(env.GOOGLE_CLIENT_SECRET) },
+    { key: 'GOOGLE_REDIRECT_URI', feature: 'Google OAuth callback', configured: configured(env.GOOGLE_REDIRECT_URI) },
+    { key: 'SUPABASE_SERVICE_ROLE_KEY', feature: 'Server-side database admin integration', configured: configured(env.SUPABASE_SERVICE_ROLE_KEY) },
+    { key: 'VITE_SUPABASE_URL', feature: 'Browser Supabase client', configured: configured(env.VITE_SUPABASE_URL) },
+    { key: 'VITE_SUPABASE_ANON_KEY', feature: 'Browser Supabase client', configured: configured(env.VITE_SUPABASE_ANON_KEY) },
+    { key: 'DATABASE_URL', feature: 'Server persistence', configured: configured(env.DATABASE_URL) },
+    { key: 'STORAGE_BUCKET', feature: 'Robot code and CAD storage', configured: configured(env.STORAGE_BUCKET) || configured(env.UPLOAD_BUCKET) },
+    { key: 'UPLOAD_BUCKET', feature: 'Robot media upload storage', configured: configured(env.UPLOAD_BUCKET) || configured(env.STORAGE_BUCKET) },
+  ];
 }
 
-async function callOpenAiCompatible(args: { provider: string; url: string; key?: string; model?: string; prompt: string; extraHeaders?: Record<string, string> }) {
+type ChatContent = string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>;
+type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: ChatContent };
+
+const DEFAULT_SYSTEM =
+  'You are RoboLab AI, the built-in competition copilot for a VEX V5/V5RC platform. Give concise, practical, safety-aware advice tailored to RoboLab features: live team lookup, tournament history, scouting, alliance selection, VEXcode review, CAD checks, autonomous path planning, and robot troubleshooting. Format the response with short headings and bullets, not markdown tables.';
+
+async function callOpenAiCompatible(args: { provider: string; url: string; key?: string; model?: string; prompt?: string; messages?: ChatMessage[]; extraHeaders?: Record<string, string>; temperature?: number; maxTokens?: number }) {
   if (!configured(args.key)) return { provider: args.provider, model: args.model, status: 'missing_key' as const };
+  const messages: ChatMessage[] = args.messages ?? [
+    { role: 'system', content: DEFAULT_SYSTEM },
+    { role: 'user', content: args.prompt ?? '' },
+  ];
   const response = await fetch(args.url, {
     method: 'POST',
     headers: {
@@ -65,16 +81,9 @@ async function callOpenAiCompatible(args: { provider: string; url: string; key?:
     },
     body: JSON.stringify({
       model: args.model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are RoboLab AI, the built-in competition copilot for a VEX V5/V5RC platform. Give concise, practical, safety-aware advice tailored to RoboLab features: live team lookup, tournament history, scouting, alliance selection, VEXcode review, CAD checks, autonomous path planning, and robot troubleshooting. Format the response with short headings and bullets, not markdown tables.',
-        },
-        { role: 'user', content: args.prompt },
-      ],
-      temperature: 0.2,
-      max_tokens: 550,
+      messages,
+      temperature: args.temperature ?? 0.2,
+      max_tokens: args.maxTokens ?? 550,
     }),
   });
   const json = record(await response.json().catch(() => ({})));
@@ -140,10 +149,112 @@ async function fetchJsonSummary(source: string, key: string | undefined, url: st
   }
 }
 
+type ForumSource = { title: string; url: string; blurb: string };
+
+function stripHtml(input: string): string {
+  return input
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&hellip;/g, '…')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Retrieve real VEX Forum threads (posts by actual people) to ground the AI coach.
+// The forum itself is Cloudflare-protected, so we discover real thread links via a
+// search engine (DuckDuckGo HTML), which is not blocked for server-side requests.
+async function fetchVexForum(query: string): Promise<ForumSource[]> {
+  const q = query.trim().slice(0, 200);
+  if (!q) return [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:vexforum.com ${q}`)}`, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml',
+      },
+    });
+    if (!response.ok) return [];
+    const html = await response.text();
+
+    const snippets: string[] = [];
+    const snippetRe = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = snippetRe.exec(html))) snippets.push(stripHtml(sm[1]));
+
+    const out: ForumSource[] = [];
+    const anchorRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    let am: RegExpExecArray | null;
+    let index = 0;
+    while ((am = anchorRe.exec(html)) && out.length < 5) {
+      let href = am[1];
+      const uddg = href.match(/[?&]uddg=([^&]+)/);
+      if (uddg) href = decodeURIComponent(uddg[1]);
+      const ordinal = index++;
+      if (!/vexforum\.com\/t\//.test(href)) continue;
+      const title = stripHtml(am[2]);
+      if (!title) continue;
+      out.push({ title, url: href.split(/[?#]/)[0], blurb: snippets[ordinal] ?? '' });
+    }
+    return out;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const COACH_SYSTEM = `You are RoboLab AI Coach — a warm, encouraging, and extremely knowledgeable VEX Robotics mentor built into the RoboLab mobile app. You help students (often middle/high schoolers) and coaches. Be compassionate, supportive, and confidence-building. Never condescend. Celebrate effort, reduce stress, and make hard things feel doable.
+
+== HOW VEX EVENTS WORK (use this to be scenario-smart) ==
+Programs: V5RC (V5 Robotics Competition, high school + middle school), VIQRC (VEX IQ, elementary/middle, plastic), VEX U (university), VEX AI.
+Event day flow:
+1) Check-in + inspection: robots must pass sizing (V5RC starts within 18"x18"x18") and hardware/rules inspection before they can compete.
+2) Practice matches (optional), then Qualification matches.
+3) Qualification matches: in V5RC, two alliances (Red vs Blue), each with 2 randomly-assigned teams. You play WITH a random partner and AGAINST 2 opponents. Each match has a 15s Autonomous period then Driver Control. Winning auton earns the Autonomous Win Point.
+4) Rankings use Win Points (WP), Autonomous Points (AP), and Strength of Schedule (SP) — WP first, then AP, then SP. (VIQRC is cooperative: two teams work TOGETHER for a combined score, ranked by average.)
+5) Alliance selection: top-ranked teams become alliance captains and pick partners to form elimination alliances.
+6) Elimination bracket: alliances play best-of or single matches to a final.
+7) Robot Skills Challenge (separate ranking): Driver Skills (60s) + Autonomous/Programming Skills (60s); combined score qualifies teams to championships.
+Qualification path: performing well / winning awards (e.g., Excellence, Tournament Champion) or skills ranking can qualify a team to regional/state/provincial championships and ultimately the VEX Robotics World Championship.
+
+== SCENARIO AWARENESS (very important) ==
+The user message is usually about a real situation at a tournament. You may be given platform context: the team number, program, season, robot status, recent scouting notes, watchlist, and — critically — the team's NEXT MATCH (field + match number + time).
+- If a next match is provided and is soon, ALWAYS acknowledge it kindly and tie urgency to it. Example: "Since you're up soon at Field 2, Match 3, here's the fastest fix first…" then give the quick fix before deeper improvements.
+- Tailor advice to time pressure: triage what can be fixed in minutes vs. after the event.
+
+== IMAGES / VIDEO ==
+You may receive photos or video frames of a robot/chassis/mechanism/field. Analyze them carefully:
+- Describe what you actually see (drivetrain type, motor/wire routing, structure, obvious issues like loose standoffs, chain tension, missing screws, frame racking, wheel alignment).
+- Only state what is visible; if unsure, say what to check rather than guessing. Never invent part SKUs or measurements.
+
+== GROUNDING ==
+- You may be given excerpts from REAL VEX Forum threads (posts by actual people). When relevant, base your answer on them and cite inline like [1], [2] matching the numbered sources.
+- You may also be given MULTIPLE expert AI drafts; reconcile them, keep what's correct, and drop anything contradictory or unverifiable.
+- Never invent forum links, rankings, awards, or match results. If unsure, say so honestly.
+
+== RESPONSE FORMAT (Markdown, mobile-first, beautiful) ==
+- Start with one warm, direct sentence answering the question.
+- Use "## " section headings and "- " bullet lists. Use **bold** for key terms and \`inline code\` for code/ports/commands.
+- For fixes, give an ordered, prioritized list (fastest/most-likely first) and a short "why it works".
+- Keep it scannable on a phone. Avoid tables.
+- End with a line exactly like: "Confidence: High|Medium|Low — <one short reason>".`;
+
 function platformApi(mode: string): Plugin {
   const env = loadEnv(mode, process.cwd(), '');
-  const token = env.ROBOTEVENTS_API_TOKEN;
+  const token = env.ROBOTEVENTS_API_TOKEN || env.ROBOT_EVENTS_API_TOKEN;
+  const robotEventsBaseUrl = (env.ROBOTEVENTS_BASE_URL || 'https://events.vex.com/api/v2').replace(/\/+$/, '');
+  const robotEventsCacheTtlMs = Math.max(5, Number(env.ROBOTEVENTS_CACHE_TTL_SECONDS || 30) || 30) * 1000;
   const cache = new Map<string, { at: number; body: string; status: number; contentType: string }>();
+  const googleSessions = new Map<string, { email: string; name: string; avatarUrl: string; lastSeenAt: string }>();
 
   async function mockRouteHandler(req: ServerReq, res: ServerRes) {
     if (!req.url?.startsWith('/api/')) return false;
@@ -154,7 +265,6 @@ function platformApi(mode: string): Plugin {
       '/api/compare',
       '/api/alliance/recommend',
       '/api/matches/predict',
-      '/api/ai/coach',
       '/api/picklist/update',
       '/api/messages/conversations',
       '/api/messages/ai/summarize',
@@ -203,16 +313,16 @@ function platformApi(mode: string): Plugin {
 
     if (!token) {
       res.statusCode = 503;
-      res.end(JSON.stringify({ ok: false, error: { code: 'missing_token', message: 'ROBOTEVENTS_API_TOKEN is not set on the server.' } }));
+      res.end(JSON.stringify({ ok: false, error: { code: 'missing_token', message: 'ROBOTEVENTS_API_TOKEN or ROBOT_EVENTS_API_TOKEN is not set on the server.' } }));
       return true;
     }
 
     const incoming = new URL(req.url, 'http://localhost');
     const apiPath = incoming.pathname.replace(/^\/api\/robotevents/, '') || '/events';
-    const target = `https://events.vex.com/api/v2${apiPath}${incoming.search}`;
+    const target = `${robotEventsBaseUrl}${apiPath}${incoming.search}`;
     const cached = cache.get(target);
 
-    if (cached && Date.now() - cached.at < 30_000) {
+    if (cached && Date.now() - cached.at < robotEventsCacheTtlMs) {
       res.statusCode = cached.status;
       res.setHeader('Content-Type', cached.contentType);
       res.setHeader('X-RoboLab-Cache', 'hit');
@@ -264,6 +374,315 @@ function platformApi(mode: string): Plugin {
       );
     }
 
+    return true;
+  }
+
+  async function googleAuthHandler(req: ServerReq, res: ServerRes) {
+    if (!req.url?.startsWith('/api/auth/google/')) return false;
+    const url = new URL(req.url, 'http://localhost');
+    const clientId = env.GOOGLE_CLIENT_ID || env.VITE_GOOGLE_CLIENT_ID;
+    const host = Array.isArray(req.headers?.host) ? req.headers?.host[0] : req.headers?.host;
+    const redirectUri = env.GOOGLE_REDIRECT_URI || `http://${host || 'localhost:5173'}/api/auth/google/callback`;
+    const clientSecretConfigured = configured(env.GOOGLE_CLIENT_SECRET);
+    const configuredForStart = configured(clientId) && configured(redirectUri) && clientSecretConfigured;
+
+    if (url.pathname === '/api/auth/google/session') {
+      const cookieHeader = Array.isArray(req.headers?.cookie) ? req.headers?.cookie.join('; ') : req.headers?.cookie ?? '';
+      const match = String(cookieHeader).match(/(?:^|;\s*)robolab_google_session=([^;]+)/);
+      const session = match ? googleSessions.get(decodeURIComponent(match[1])) : null;
+      res.setHeader('Content-Type', 'application/json');
+      res.statusCode = 200;
+      res.end(JSON.stringify({ ok: true, data: session ?? null }));
+      return true;
+    }
+
+    if (url.pathname === '/api/auth/google/status') {
+      res.setHeader('Content-Type', 'application/json');
+      res.statusCode = 200;
+      res.end(
+        JSON.stringify({
+          ok: true,
+          data: {
+            configured: configuredForStart,
+            clientIdConfigured: configured(clientId),
+            clientSecretConfigured,
+            redirectUriConfigured: configured(env.GOOGLE_REDIRECT_URI) || configured(host),
+          },
+        }),
+      );
+      return true;
+    }
+
+    if (url.pathname === '/api/auth/google/start') {
+      if (!configuredForStart) {
+        res.setHeader('Content-Type', 'application/json');
+        res.statusCode = 503;
+        res.end(JSON.stringify({ ok: false, error: { code: 'google_auth_not_configured', message: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REDIRECT_URI is missing on the server.' } }));
+        return true;
+      }
+
+      const state = Buffer.from(
+        JSON.stringify({
+          email: url.searchParams.get('email') ?? '',
+          at: Date.now(),
+        }),
+      ).toString('base64url');
+      const target = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      target.searchParams.set('client_id', clientId);
+      target.searchParams.set('redirect_uri', redirectUri);
+      target.searchParams.set('response_type', 'code');
+      target.searchParams.set('scope', 'openid email profile');
+      target.searchParams.set('prompt', 'select_account');
+      target.searchParams.set('state', state);
+
+      res.statusCode = 302;
+      res.setHeader('Location', target.toString());
+      res.end('');
+      return true;
+    }
+
+    if (url.pathname === '/api/auth/google/callback') {
+      const code = url.searchParams.get('code');
+      if (!code || !configured(clientId) || !clientSecretConfigured) {
+        res.statusCode = 302;
+        res.setHeader('Location', '/app/settings?google=error');
+        res.end('');
+        return true;
+      }
+
+      try {
+        const tokenBody = new URLSearchParams({
+          client_id: clientId,
+          client_secret: env.GOOGLE_CLIENT_SECRET,
+          code,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+        });
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: tokenBody,
+        });
+        const tokenJson = record(await tokenResponse.json().catch(() => ({})));
+        const accessToken = String(tokenJson.access_token ?? '');
+        if (!tokenResponse.ok || !accessToken) throw new Error(String(record(tokenJson.error).message ?? tokenJson.error_description ?? 'Google token exchange failed.'));
+
+        const profileResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const profile = record(await profileResponse.json().catch(() => ({})));
+        const email = String(profile.email ?? '').trim().toLowerCase();
+        const name = String(profile.name ?? email.split('@')[0] ?? 'You').trim() || 'You';
+        const avatarUrl = String(profile.picture ?? '').trim();
+        if (!profileResponse.ok || !email) throw new Error('Google profile did not include a verified email.');
+
+        const sessionId = `gs-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+        googleSessions.set(sessionId, { email, name, avatarUrl, lastSeenAt: new Date().toISOString() });
+        res.statusCode = 302;
+        res.setHeader('Set-Cookie', `robolab_google_session=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`);
+        res.setHeader('Location', '/app/settings?google=connected');
+        res.end('');
+      } catch {
+        res.statusCode = 302;
+        res.setHeader('Location', '/app/settings?google=error');
+        res.end('');
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  type Draft = { provider: string; model?: string; content: string };
+
+  function textProviders(messages: ChatMessage[]) {
+    return [
+      () => callOpenAiCompatible({ provider: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: env.GROQ_API_KEY, model: env.GROQ_MODEL || 'llama-3.3-70b-versatile', messages, maxTokens: 850 }),
+      () => callOpenAiCompatible({ provider: 'DeepSeek', url: 'https://api.deepseek.com/chat/completions', key: env.DEEPSEEK_API_KEY, model: env.DEEPSEEK_MODEL || 'deepseek-chat', messages, maxTokens: 850 }),
+      () => callOpenAiCompatible({
+        provider: 'OpenRouter',
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        key: env.OPENROUTER_API_KEY,
+        model: env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
+        messages,
+        maxTokens: 850,
+        extraHeaders: { 'HTTP-Referer': env.OPENROUTER_REFERER || 'http://localhost:5173', 'X-Title': 'RoboLab VEX Platform' },
+      }),
+      () => callOpenAiCompatible({ provider: 'OpenAI', url: 'https://api.openai.com/v1/chat/completions', key: env.OPENAI_API_KEY, model: env.OPENAI_MODEL || 'gpt-4o-mini', messages, maxTokens: 850 }),
+    ];
+  }
+
+  function visionProviders(messages: ChatMessage[]) {
+    return [
+      () => callOpenAiCompatible({ provider: 'OpenAI', url: 'https://api.openai.com/v1/chat/completions', key: env.OPENAI_API_KEY, model: env.OPENAI_VISION_MODEL || env.OPENAI_MODEL || 'gpt-4o-mini', messages, maxTokens: 900 }),
+      () => callOpenAiCompatible({
+        provider: 'OpenRouter',
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        key: env.OPENROUTER_API_KEY,
+        model: env.OPENROUTER_VISION_MODEL || 'openai/gpt-4o-mini',
+        messages,
+        maxTokens: 900,
+        extraHeaders: { 'HTTP-Referer': env.OPENROUTER_REFERER || 'http://localhost:5173', 'X-Title': 'RoboLab VEX Platform' },
+      }),
+      () => callOpenAiCompatible({ provider: 'Groq Vision', url: 'https://api.groq.com/openai/v1/chat/completions', key: env.GROQ_API_KEY, model: env.GROQ_VISION_MODEL || 'llama-3.2-90b-vision-preview', messages, maxTokens: 900 }),
+    ];
+  }
+
+  async function collectDrafts(providers: Array<() => Promise<Awaited<ReturnType<typeof callOpenAiCompatible>>>>): Promise<Draft[]> {
+    const settled = await Promise.allSettled(providers.map((provider) => provider()));
+    return settled.flatMap((result) =>
+      result.status === 'fulfilled' && result.value.status === 'ok' && 'content' in result.value && result.value.content
+        ? [{ provider: result.value.provider, model: result.value.model, content: result.value.content }]
+        : [],
+    );
+  }
+
+  async function coachHandler(req: ServerReq, res: ServerRes) {
+    if (!req.url?.startsWith('/api/ai/coach')) return false;
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      res.end(JSON.stringify({ ok: false, error: { code: 'method_not_allowed', message: 'Use POST.' } }));
+      return true;
+    }
+
+    const body = await readJsonBody(req);
+    const rawHistory = Array.isArray(body.messages) ? (body.messages as Array<Record<string, unknown>>) : [];
+    const history: ChatMessage[] = rawHistory
+      .map((item) => ({
+        role: item.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof item.content === 'string' ? item.content.slice(0, 4000) : '',
+      }) as ChatMessage)
+      .filter((item) => typeof item.content === 'string' && item.content)
+      .slice(-8);
+    const promptText = typeof body.prompt === 'string' ? body.prompt : '';
+    const lastUserText = (() => {
+      const found = [...history].reverse().find((item) => item.role === 'user');
+      return typeof found?.content === 'string' ? found.content : promptText;
+    })();
+    const context = typeof body.context === 'string' ? body.context : '';
+    const images = Array.isArray(body.images)
+      ? (body.images as unknown[]).filter((value): value is string => typeof value === 'string' && value.startsWith('data:')).slice(0, 6)
+      : [];
+    const visionMode = images.length > 0;
+
+    const sources = await fetchVexForum(lastUserText);
+    const forumBlock = sources.length
+      ? `Real VEX Forum threads to ground your answer (cite as [1], [2], ...):\n${sources
+          .map((source, index) => `[${index + 1}] ${source.title}\n${source.blurb}\n${source.url}`)
+          .join('\n\n')}`
+      : 'No VEX Forum threads were retrieved for this question. Use general VEX expertise and say the guidance is general, not cited.';
+
+    const groundingSystem: ChatMessage = { role: 'system', content: `${forumBlock}${context ? `\n\nLIVE PLATFORM CONTEXT (use it; acknowledge any upcoming match):\n${context.slice(0, 4000)}` : ''}` };
+    const messages: ChatMessage[] = [{ role: 'system', content: COACH_SYSTEM }, groundingSystem, ...history];
+    if (!history.length && promptText) messages.push({ role: 'user', content: promptText });
+
+    // Attach images to the latest user turn for vision models.
+    if (visionMode) {
+      let attached = false;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+          const text = typeof messages[i].content === 'string' ? (messages[i].content as string) : '';
+          messages[i] = {
+            role: 'user',
+            content: [
+              { type: 'text', text: text || 'Please analyze the attached photo(s)/video frames of my robot and tell me what to fix and why.' },
+              ...images.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+            ],
+          };
+          attached = true;
+          break;
+        }
+      }
+      if (!attached) {
+        messages.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Please analyze the attached photo(s)/video frames of my robot and tell me what to fix and why.' },
+            ...images.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+          ],
+        });
+      }
+    }
+
+    // Query EVERY available model in parallel, then synthesize a single best answer
+    // (cross-checking the drafts) to reduce wrong answers.
+    const drafts = await collectDrafts(visionMode ? visionProviders(messages) : textProviders(messages));
+
+    let answer = '';
+    let provider = '';
+    const modelsUsed = drafts.map((draft) => draft.provider);
+
+    if (drafts.length >= 2) {
+      const synthMessages: ChatMessage[] = [
+        { role: 'system', content: COACH_SYSTEM },
+        groundingSystem,
+        {
+          role: 'user',
+          content: `User question: ${lastUserText || '(see attached images)'}\n\nBelow are ${drafts.length} independent expert AI drafts answering this. Merge them into ONE best answer that follows the format rules exactly. Reconcile disagreements, keep only what is correct and verifiable, cite forum sources [n] when used, and acknowledge any upcoming match from the context.\n\n${drafts
+            .map((draft, index) => `--- Draft ${index + 1} (${draft.provider}) ---\n${draft.content}`)
+            .join('\n\n')}`,
+        },
+      ];
+      for (const synth of textProviders(synthMessages)) {
+        try {
+          const result = await synth();
+          if (result.status === 'ok' && 'content' in result && result.content) {
+            answer = result.content;
+            provider = `${result.provider} · cross-checked ${drafts.length} models`;
+            break;
+          }
+        } catch {
+          // try next synthesizer
+        }
+      }
+    }
+
+    if (!answer && drafts.length) {
+      answer = drafts[0].content;
+      provider = drafts[0].provider;
+    }
+
+    if (!answer) {
+      try {
+        const hf = await callHuggingFace(env, `${lastUserText}\n\n${forumBlock}`);
+        if (hf.status === 'ok' && hf.content) {
+          answer = hf.content;
+          provider = hf.provider;
+          modelsUsed.push('HuggingFace');
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!answer) {
+      const related = sources.length ? `\n\n## Related VEX Forum threads\n${sources.map((source) => `- ${source.title} — ${source.url}`).join('\n')}` : '';
+      answer = `I could not reach an AI model right now, but here is a solid checklist while you retry.\n\n${deterministicAdvice(lastUserText, context)}${related}\n\nConfidence: Low — no AI provider responded, so this is RoboLab's offline checklist.`;
+      provider = 'RoboLab offline';
+    }
+
+    const confidence = sources.length >= 2 || drafts.length >= 3 ? 'High' : sources.length >= 1 || drafts.length >= 2 ? 'Medium' : 'Low';
+    res.statusCode = 200;
+    res.end(
+      JSON.stringify({
+        ok: true,
+        data: {
+          answer,
+          provider: provider || 'unknown',
+          model: null,
+          confidence,
+          sources,
+          models: modelsUsed,
+          hasVision: visionMode,
+          dataSources: [
+            sources.length ? 'Live VEX Forum retrieval' : 'General VEX expertise',
+            modelsUsed.length > 1 ? `${modelsUsed.length}-model cross-check` : 'Single model',
+            visionMode ? 'Image/video analysis' : 'Text reasoning',
+          ],
+        },
+      }),
+    );
     return true;
   }
 
@@ -359,8 +778,10 @@ function platformApi(mode: string): Plugin {
     name: 'robolab-platform-api',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
+        if (await googleAuthHandler(req as ServerReq, res)) return;
         if (await mockRouteHandler(req as ServerReq, res)) return;
         if (await robotEventsHandler(req as ServerReq, res)) return;
+        if (await coachHandler(req as ServerReq, res)) return;
         if (await aiHandler(req as ServerReq, res)) return;
         if (await statusHandler(req as ServerReq, res)) return;
         if (await sponsorSignalsHandler(req as ServerReq, res)) return;
@@ -369,8 +790,10 @@ function platformApi(mode: string): Plugin {
     },
     configurePreviewServer(server) {
       server.middlewares.use(async (req, res, next) => {
+        if (await googleAuthHandler(req as ServerReq, res)) return;
         if (await mockRouteHandler(req as ServerReq, res)) return;
         if (await robotEventsHandler(req as ServerReq, res)) return;
+        if (await coachHandler(req as ServerReq, res)) return;
         if (await aiHandler(req as ServerReq, res)) return;
         if (await statusHandler(req as ServerReq, res)) return;
         if (await sponsorSignalsHandler(req as ServerReq, res)) return;
@@ -384,5 +807,13 @@ export default defineConfig(({ mode }) => ({
   plugins: [platformApi(mode)],
   server: {
     port: 5173,
+    host: true,
+  },
+  // `npm start` runs `vite preview`, which also runs the API middleware
+  // (configurePreviewServer) so /api/* works in production on Render.
+  preview: {
+    port: Number(process.env.PORT) || 4173,
+    host: true,
+    allowedHosts: true,
   },
 }));
