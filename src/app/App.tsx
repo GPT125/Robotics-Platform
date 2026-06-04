@@ -12,7 +12,16 @@ import { SettingsPage } from "./components/pages/SettingsPage";
 import { TodoPage } from "./components/pages/TodoPage";
 
 export default function App() {
-  const [activePage, setActivePage] = useState("home");
+  const [activePage, setActivePage] = useState(() => {
+    const path = typeof window !== "undefined" ? window.location.pathname : "";
+    if (path.includes("/teams") || path.includes("/events")) return "lookup";
+    if (path.includes("/coach")) return "coach";
+    if (path.includes("/scout")) return "scout";
+    if (path.includes("/messages")) return "messages";
+    if (path.includes("/settings")) return "settings";
+    return "home";
+  });
+  const [forceOnboarding, setForceOnboarding] = useState(false);
 
   const pages: Record<string, React.ReactNode> = {
     home: <HomePage onNavigate={setActivePage} />,
@@ -20,7 +29,7 @@ export default function App() {
     coach: <CoachPage />,
     scout: <ScoutPage />,
     messages: <MessagesPage />,
-    settings: <SettingsPage />,
+    settings: <SettingsPage onSignIn={() => setForceOnboarding(true)} />,
     todos: <TodoPage onBack={() => setActivePage("home")} />,
   };
 
@@ -49,7 +58,7 @@ export default function App() {
             </div>
 
             {!isSubPage ? <BottomNav active={activePage} onChange={setActivePage} /> : null}
-            <Onboarding />
+            {activePage !== "settings" || forceOnboarding ? <Onboarding /> : null}
           </div>
         </div>
         <style>{`

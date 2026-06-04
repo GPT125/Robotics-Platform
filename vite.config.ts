@@ -58,6 +58,11 @@ function integrationRows(env: Record<string, string>) {
     { key: 'VITE_SUPABASE_URL', feature: 'Browser Supabase client', configured: configured(env.VITE_SUPABASE_URL) },
     { key: 'VITE_SUPABASE_ANON_KEY', feature: 'Browser Supabase client', configured: configured(env.VITE_SUPABASE_ANON_KEY) },
     { key: 'DATABASE_URL', feature: 'Server persistence', configured: configured(env.DATABASE_URL) },
+    { key: 'RESEND_API_KEY', feature: 'Teammate invite email delivery', configured: configured(env.RESEND_API_KEY) },
+    { key: 'SENDGRID_API_KEY', feature: 'Teammate invite email delivery', configured: configured(env.SENDGRID_API_KEY) },
+    { key: 'POSTMARK_API_TOKEN', feature: 'Teammate invite email delivery', configured: configured(env.POSTMARK_API_TOKEN) },
+    { key: 'INVITE_FROM_EMAIL', feature: 'Verified invite sender email', configured: configured(env.INVITE_FROM_EMAIL) },
+    { key: 'VITE_APP_URL', feature: 'Invite link and mobile deep link base', configured: configured(env.VITE_APP_URL) },
     { key: 'STORAGE_BUCKET', feature: 'Robot code and CAD storage', configured: configured(env.STORAGE_BUCKET) || configured(env.UPLOAD_BUCKET) },
     { key: 'UPLOAD_BUCKET', feature: 'Robot media upload storage', configured: configured(env.UPLOAD_BUCKET) || configured(env.STORAGE_BUCKET) },
   ];
@@ -274,6 +279,8 @@ function platformApi(mode: string): Plugin {
       '/api/messages/ai/strategy',
       '/api/messages/ai/picklist',
       '/api/messages/mark-read',
+      '/api/invites/send',
+      '/api/predictions/feedback',
       '/api/robot-lab/analyze',
       '/api/robot-lab/parts/confirm',
     ];

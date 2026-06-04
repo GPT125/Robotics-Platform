@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, BrainCircuit, Sparkles, Link2, ChevronDown, ImagePlus, Camera, X } from "lucide-react";
+import { Send, BrainCircuit, Sparkles, Link2, ChevronDown, ImagePlus, Camera, X, Mic, MicOff } from "lucide-react";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
 import { askCoach, type CoachSource } from "../../../services/api";
@@ -7,6 +7,16 @@ import { downscaleImage, readFileAsDataUrl, extractVideoFrames } from "../media"
 
 type Attachment = { id: string; kind: "image" | "video"; preview: string; images: string[] };
 type Message = { role: "user" | "ai"; text: string; time: string; sources?: CoachSource[]; images?: string[] };
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: { results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
 
 const quickPrompts = [
   "How do I improve my autonomous?",
@@ -90,6 +100,8 @@ export function CoachPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [processing, setProcessing] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -132,6 +144,40 @@ export function CoachPage() {
     } finally {
       setProcessing(false);
     }
+  }
+
+  function toggleVoice() {
+    const win = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+    const SpeechRecognition = win.SpeechRecognition ?? win.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setMessages((prev) => [...prev, { role: "ai", text: "Voice input is not available in this browser. Use Chrome or Safari, or type your message.", time: getTime() }]);
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    let finalText = "";
+    recognition.onresult = (event) => {
+      let interim = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const item = event.results[i];
+        if (item.isFinal) finalText += item[0].transcript;
+        else interim += item[0].transcript;
+      }
+      const spoken = `${finalText} ${interim}`.trim();
+      if (spoken) setInput((prev) => (prev ? `${prev.replace(/\s+$/, "")} ${spoken}` : spoken));
+    };
+    recognition.onerror = () => setListening(false);
+    recognition.onend = () => setListening(false);
+    recognitionRef.current = recognition;
+    setListening(true);
+    recognition.start();
   }
 
   const send = async (text: string) => {
@@ -259,6 +305,9 @@ export function CoachPage() {
             <Camera size={17} style={{ color: "rgba(255,255,255,0.5)" }} />
             <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { onFiles(e.target.files); e.currentTarget.value = ""; }} />
           </label>
+          <button onClick={toggleVoice} style={{ width: 34, height: 34, borderRadius: 10, background: listening ? `${accent}20` : "transparent", border: listening ? `1px solid ${accent}35` : "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+            {listening ? <MicOff size={17} style={{ color: accent }} /> : <Mic size={17} style={{ color: "rgba(255,255,255,0.5)" }} />}
+          </button>
           <textarea
             ref={taRef}
             value={input}

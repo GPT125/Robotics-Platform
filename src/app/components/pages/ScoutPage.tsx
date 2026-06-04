@@ -2,58 +2,10 @@ import { useState, useRef } from "react";
 import { Search, Star, ChevronRight, ArrowLeft, Plus, X, Camera, Tag, TrendingUp, Shield, Zap, Image } from "lucide-react";
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { useAccent } from "../AccentContext";
+import { useApp, type RoboTeam, type ScoutNote } from "../AppContext";
+import { TeamSearch } from "../TeamSearch";
 
 const TAGS = ["Autonomous", "Driver Control", "Endgame", "Defense", "Fast Cycle", "Consistent", "Alliance Pick", "Risky", "Watch Out", "Potential"];
-
-interface ScoutNote {
-  id: string;
-  teamId: string;
-  teamName: string;
-  tags: string[];
-  description: string;
-  ratings: {
-    autonomous: number;
-    driver: number;
-    endgame: number;
-    defense: number;
-    consistency: number;
-  };
-  images: string[];
-  date: string;
-}
-
-const INITIAL_NOTES: ScoutNote[] = [
-  {
-    id: "note-1",
-    teamId: "7842A",
-    teamName: "Iron Circuit",
-    tags: ["Autonomous", "Endgame", "Alliance Pick"],
-    description: "Extremely fast intake. Dangerous in autonomous. Watch their endgame hang — they start it at 20s left. Top alliance pick for elims.",
-    ratings: { autonomous: 5, driver: 4, endgame: 5, defense: 3, consistency: 4 },
-    images: [],
-    date: "Jun 1",
-  },
-  {
-    id: "note-2",
-    teamId: "9090Z",
-    teamName: "Zero Gravity",
-    tags: ["Autonomous", "Watch Out"],
-    description: "98-point autonomous is incredible but driver control is weak. Strong auton partner, poor driver partner.",
-    ratings: { autonomous: 5, driver: 2, endgame: 2, defense: 2, consistency: 3 },
-    images: [],
-    date: "May 31",
-  },
-];
-
-const KNOWN_TEAMS = [
-  { id: "7842A", name: "Iron Circuit" },
-  { id: "3141S", name: "Circuit Breakers" },
-  { id: "1234B", name: "BotForge Beta" },
-  { id: "9090Z", name: "Zero Gravity" },
-  { id: "4455C", name: "Cyber Hawks" },
-  { id: "2277A", name: "Logic Gates" },
-  { id: "8812D", name: "Delta Force" },
-];
 
 function StarRating({ value, onChange, color }: { value: number; onChange?: (v: number) => void; color: string }) {
   return (
@@ -79,18 +31,13 @@ const RATING_FIELDS: { key: keyof ScoutNote["ratings"]; label: string }[] = [
   { key: "consistency", label: "Consistency" },
 ];
 
-function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave: (n: ScoutNote) => void; accent: string }) {
-  const [teamQuery, setTeamQuery] = useState("");
-  const [selectedTeam, setSelectedTeam] = useState<{ id: string; name: string } | null>(null);
+function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave: (n: Omit<ScoutNote, "id" | "createdAt" | "authorName">) => void; accent: string }) {
+  const [selectedTeam, setSelectedTeam] = useState<RoboTeam | null>(null);
   const [tags, setTags] = useState<string[]>([]);
   const [description, setDescription] = useState("");
   const [ratings, setRatings] = useState({ autonomous: 0, driver: 0, endgame: 0, defense: 0, consistency: 0 });
   const [images, setImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const filteredTeams = teamQuery
-    ? KNOWN_TEAMS.filter((t) => t.id.toLowerCase().includes(teamQuery.toLowerCase()) || t.name.toLowerCase().includes(teamQuery.toLowerCase()))
-    : [];
 
   const toggleTag = (tag: string) =>
     setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
@@ -109,9 +56,8 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
   const handleSave = () => {
     if (!selectedTeam) return;
     onSave({
-      id: `note-${Date.now()}`,
-      teamId: selectedTeam.id,
-      teamName: selectedTeam.name,
+      teamId: selectedTeam.number,
+      teamName: selectedTeam.team_name,
       tags,
       description,
       ratings,
@@ -145,38 +91,14 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
             <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em", marginBottom: 8 }}>TEAM</p>
             {selectedTeam ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, background: `${accent}15`, border: `1px solid ${accent}40`, borderRadius: 12, padding: "11px 14px" }}>
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 13, color: accent }}>{selectedTeam.id}</span>
-                <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", flex: 1 }}>{selectedTeam.name}</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 13, color: accent }}>{selectedTeam.number}</span>
+                <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", flex: 1 }}>{selectedTeam.team_name}</span>
                 <button onClick={() => setSelectedTeam(null)} style={{ background: "transparent", border: "none", cursor: "pointer" }}>
                   <X size={13} style={{ color: "#7a80a0" }} />
                 </button>
               </div>
             ) : (
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "10px 14px" }}>
-                  <Search size={14} style={{ color: "#7a80a0" }} />
-                  <input
-                    value={teamQuery}
-                    onChange={(e) => setTeamQuery(e.target.value)}
-                    placeholder="Search team…"
-                    style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#e8eaf0" }}
-                  />
-                </div>
-                {filteredTeams.length > 0 && (
-                  <div style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, marginTop: 4, overflow: "hidden" }}>
-                    {filteredTeams.map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => { setSelectedTeam(t); setTeamQuery(""); }}
-                        style={{ width: "100%", padding: "10px 14px", display: "flex", gap: 10, alignItems: "center", background: "transparent", border: "none", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.05)" }}
-                      >
-                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: accent, fontWeight: 600 }}>{t.id}</span>
-                        <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#e8eaf0" }}>{t.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <TeamSearch onSelect={setSelectedTeam} selectedId={selectedTeam?.id} />
             )}
           </div>
 
@@ -270,7 +192,8 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
 
 export function ScoutPage() {
   const { accent } = useAccent();
-  const [notes, setNotes] = useState<ScoutNote[]>(INITIAL_NOTES);
+  const { scoutNotes, addScoutNote } = useApp();
+  const notes = scoutNotes;
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<ScoutNote | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -446,7 +369,7 @@ export function ScoutPage() {
         <AddNoteSheet
           accent={accent}
           onClose={() => setShowAdd(false)}
-          onSave={(note) => { setNotes((prev) => [note, ...prev]); setShowAdd(false); }}
+          onSave={(note) => { addScoutNote(note); setShowAdd(false); }}
         />
       )}
     </div>

@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { ArrowLeft, Plus, Check, Trash2, Sparkles, ChevronDown, Flag, Loader2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowLeft, Plus, Check, Trash2, Sparkles, Flag, Loader2, Paperclip, Bell, Star } from "lucide-react";
 import { useAccent } from "../AccentContext";
-import { useApp, type Todo } from "../AppContext";
+import { useApp, type AppAttachment, type Todo } from "../AppContext";
 import { askCoach } from "../../../services/api";
+import { downscaleImage, readFileAsDataUrl } from "../media";
 
 const PRIORITIES: { id: Todo["priority"]; label: string; color: string }[] = [
   { id: "critical", label: "Critical", color: "#ff3b5c" },
@@ -11,6 +12,8 @@ const PRIORITIES: { id: Todo["priority"]; label: string; color: string }[] = [
   { id: "low", label: "Low", color: "#7a80a0" },
 ];
 const TAGS = ["build", "code", "notebook", "scouting", "drive", "tournament"];
+const VIEWS = ["All", "Assigned to Me", "Due Today", "Robot Fixes", "Notebook Tasks", "Tournament Prep", "Scouting Tasks", "Flagged"];
+const SECTIONS = ["General", "Robot Fixes", "Notebook", "Tournament Prep", "Scouting", "Code"];
 
 export function TodoPage({ onBack }: { onBack: () => void }) {
   const { accent } = useAccent();
@@ -18,18 +21,37 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<Todo["priority"]>(null);
   const [tag, setTag] = useState<string | null>(null);
+  const [due, setDue] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const [shared, setShared] = useState(false);
+  const [view, setView] = useState("All");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState<string | null>(null);
+  const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  const open = todos.filter((t) => !t.done);
-  const done = todos.filter((t) => t.done);
+  const filteredTodos = todos.filter((t) => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (view === "Assigned to Me") return Boolean(t.assignee);
+    if (view === "Due Today") return t.due === today || t.alertAt?.startsWith(today);
+    if (view === "Robot Fixes") return t.tags.includes("build") || /fix|repair|robot/i.test(t.title + t.notes);
+    if (view === "Notebook Tasks") return t.tags.includes("notebook") || /notebook|entry/i.test(t.title + t.notes);
+    if (view === "Tournament Prep") return t.tags.includes("tournament") || t.section === "Tournament Prep";
+    if (view === "Scouting Tasks") return t.tags.includes("scouting") || t.section === "Scouting";
+    if (view === "Flagged") return t.flagged;
+    return true;
+  });
+  const open = filteredTodos.filter((t) => !t.done);
+  const done = filteredTodos.filter((t) => t.done);
 
   function add() {
     if (!title.trim()) return;
-    addTodo({ title: title.trim(), priority, tags: tag ? [tag] : [] });
+    addTodo({ title: title.trim(), priority, tags: tag ? [tag] : [], due: due || null, assignee: assignee || null, shared, section: tag === "notebook" ? "Notebook" : tag === "scouting" ? "Scouting" : tag === "tournament" ? "Tournament Prep" : "General" });
     setTitle("");
     setPriority(null);
     setTag(null);
+    setDue("");
+    setAssignee("");
+    setShared(false);
   }
 
   async function breakIntoSteps(t: Todo) {
@@ -40,6 +62,36 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
       if (steps.length) updateTodo(t.id, { subtasks: [...t.subtasks, ...steps.map((s) => ({ id: `${Date.now()}${Math.random()}`, title: s, done: false }))] });
       setExpanded(t.id);
     } catch { /* ignore */ } finally { setAiBusy(null); }
+  }
+
+  async function aiTaskTool(t: Todo, mode: "notebook" | "parts" | "checklist") {
+    setAiBusy(t.id);
+    const prompt =
+      mode === "notebook"
+        ? `Turn this robotics task into a concise engineering notebook entry draft with observations, next steps, and evidence needed: "${t.title}". Existing notes: ${t.notes}`
+        : mode === "parts"
+          ? `Estimate likely VEX V5 parts/tools needed for this task without inventing exact quantities unless obvious. Make it a short checklist: "${t.title}". Existing notes: ${t.notes}`
+          : `Create a tournament-day checklist for this VEX task. Keep it short and actionable: "${t.title}". Existing notes: ${t.notes}`;
+    try {
+      const r = await askCoach({ messages: [{ role: "user", content: prompt }] });
+      updateTodo(t.id, { notes: [t.notes, r.answer.replace(/^confidence:.*$/gim, "").trim()].filter(Boolean).join("\n\n") });
+      setExpanded(t.id);
+    } catch {
+      // keep existing notes if AI is unavailable
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  async function attachFiles(t: Todo, files: FileList | null) {
+    if (!files?.length) return;
+    const next: AppAttachment[] = [];
+    for (const file of Array.from(files).slice(0, 3)) {
+      const raw = await readFileAsDataUrl(file);
+      const url = file.type.startsWith("image") ? await downscaleImage(raw, 900, 0.82) : raw;
+      next.push({ id: `${Date.now()}-${next.length}`, kind: file.type.startsWith("video") ? "video" : file.type.startsWith("image") ? "image" : "file", name: file.name, url });
+    }
+    updateTodo(t.id, { attachments: [...t.attachments, ...next] });
   }
 
   const pColor = (p: Todo["priority"]) => PRIORITIES.find((x) => x.id === p)?.color;
@@ -58,6 +110,8 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
               {t.priority ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: pColor(t.priority), background: `${pColor(t.priority)}1a`, padding: "1px 6px", borderRadius: 5 }}><Flag size={9} />{t.priority}</span> : null}
               {t.tags.map((tg) => <span key={tg} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#9aa0bf", background: "rgba(255,255,255,0.06)", padding: "1px 6px", borderRadius: 5 }}>#{tg}</span>)}
               {t.assignee ? <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9, color: accent }}>@{t.assignee}</span> : null}
+              {t.due ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0" }}>{t.due}</span> : null}
+              {t.flagged ? <Star size={10} style={{ color: "#f59e0b", fill: "#f59e0b" }} /> : null}
               {t.subtasks.length ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0" }}>{t.subtasks.filter((s) => s.done).length}/{t.subtasks.length}</span> : null}
             </div>
           </div>
@@ -81,6 +135,42 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
                   {teammates.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
                 </select>
               ) : null}
+              <button onClick={() => updateTodo(t.id, { flagged: !t.flagged })} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: t.flagged ? "#f59e0b18" : "rgba(255,255,255,0.04)", border: `1px solid ${t.flagged ? "#f59e0b40" : "rgba(255,255,255,0.08)"}`, borderRadius: 12, padding: "5px 10px", color: t.flagged ? "#f59e0b" : "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><Star size={12} />Flag</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <input type="date" value={t.due ?? ""} onChange={(e) => updateTodo(t.id, { due: e.target.value || null })} style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "8px 10px", color: "#cfd3e6", fontSize: 11, outline: "none" }} />
+              <input type="datetime-local" value={t.alertAt ?? ""} onChange={(e) => updateTodo(t.id, { alertAt: e.target.value || null })} style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "8px 10px", color: "#cfd3e6", fontSize: 11, outline: "none" }} />
+              <select value={t.status} onChange={(e) => updateTodo(t.id, { status: e.target.value as Todo["status"], done: e.target.value === "done" })} style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "8px 10px", color: "#cfd3e6", fontSize: 11, outline: "none" }}>
+                <option value="todo">To do</option>
+                <option value="doing">Doing</option>
+                <option value="blocked">Blocked</option>
+                <option value="done">Done</option>
+              </select>
+              <select value={t.section} onChange={(e) => updateTodo(t.id, { section: e.target.value })} style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "8px 10px", color: "#cfd3e6", fontSize: 11, outline: "none" }}>
+                {SECTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={t.repeat} onChange={(e) => updateTodo(t.id, { repeat: e.target.value as Todo["repeat"] })} style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "8px 10px", color: "#cfd3e6", fontSize: 11, outline: "none" }}>
+                <option value="none">No repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="event">Tournament reminder</option>
+              </select>
+              <button onClick={() => updateTodo(t.id, { shared: !t.shared })} style={{ background: t.shared ? `${accent}14` : "#181c2e", border: `1px solid ${t.shared ? accent + "35" : "rgba(255,255,255,0.1)"}`, borderRadius: 12, padding: "8px 10px", color: t.shared ? accent : "#cfd3e6", fontSize: 11, outline: "none", cursor: "pointer" }}>{t.shared ? "Shared team task" : "Individual task"}</button>
+            </div>
+            <textarea value={t.notes} onChange={(e) => updateTodo(t.id, { notes: e.target.value })} placeholder="Notes, comments, or notebook details…" style={{ width: "100%", minHeight: 64, boxSizing: "border-box", background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "9px 10px", color: "#cfd3e6", fontSize: 12, outline: "none", resize: "vertical", fontFamily: "'Inter', sans-serif" }} />
+            {t.attachments.length ? (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {t.attachments.map((a) => (
+                  <button key={a.id} onClick={() => updateTodo(t.id, { attachments: t.attachments.filter((x) => x.id !== a.id) })} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "5px 8px", color: "#9aa0bf", fontSize: 10, fontFamily: "'Inter', sans-serif", cursor: "pointer" }}>{a.name}</button>
+                ))}
+              </div>
+            ) : null}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => fileRefs.current[t.id]?.click()} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "5px 10px", color: "#9aa0bf", fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><Paperclip size={12} />Attach</button>
+              <input ref={(el) => { fileRefs.current[t.id] = el; }} type="file" accept="image/*,video/*,.pdf,.txt" multiple style={{ display: "none" }} onChange={(e) => { attachFiles(t, e.target.files); e.currentTarget.value = ""; }} />
+              <button onClick={() => aiTaskTool(t, "notebook")} disabled={aiBusy === t.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: `${accent}14`, border: `1px solid ${accent}35`, borderRadius: 12, padding: "5px 10px", color: accent, fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><Sparkles size={12} />Notebook</button>
+              <button onClick={() => aiTaskTool(t, "parts")} disabled={aiBusy === t.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: `${accent}14`, border: `1px solid ${accent}35`, borderRadius: 12, padding: "5px 10px", color: accent, fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><Sparkles size={12} />Parts</button>
+              <button onClick={() => aiTaskTool(t, "checklist")} disabled={aiBusy === t.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: `${accent}14`, border: `1px solid ${accent}35`, borderRadius: 12, padding: "5px 10px", color: accent, fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><Bell size={12} />Checklist</button>
             </div>
           </div>
         ) : null}
@@ -115,9 +205,23 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
               <button key={tg} onClick={() => setTag(tag === tg ? null : tg)} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: tag === tg ? accent : "#7a80a0", background: tag === tg ? `${accent}1a` : "rgba(255,255,255,0.04)", border: `1px solid ${tag === tg ? accent + "40" : "rgba(255,255,255,0.08)"}`, borderRadius: 8, padding: "4px 9px", cursor: "pointer" }}>#{tg}</button>
             ))}
           </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+            <input type="date" value={due} onChange={(e) => setDue(e.target.value)} style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "9px 10px", color: "#cfd3e6", fontSize: 12, outline: "none" }} />
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "9px 10px", color: "#cfd3e6", fontSize: 12, outline: "none" }}>
+              <option value="">Unassigned</option>
+              {teammates.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
+            </select>
+          </div>
+          <button onClick={() => setShared(!shared)} style={{ marginTop: 8, background: shared ? `${accent}14` : "rgba(255,255,255,0.04)", border: `1px solid ${shared ? accent + "40" : "rgba(255,255,255,0.08)"}`, borderRadius: 10, padding: "7px 10px", color: shared ? accent : "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>{shared ? "Shared team task" : "Individual task"}</button>
         </div>
 
-        {todos.length === 0 ? (
+        <div style={{ display: "flex", gap: 7, overflowX: "auto", scrollbarWidth: "none", marginBottom: 14, paddingBottom: 2 }}>
+          {VIEWS.map((v) => (
+            <button key={v} onClick={() => setView(v)} style={{ flexShrink: 0, background: view === v ? `${accent}18` : "rgba(255,255,255,0.04)", border: `1px solid ${view === v ? accent + "40" : "rgba(255,255,255,0.08)"}`, borderRadius: 12, padding: "6px 10px", color: view === v ? accent : "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>{v}</button>
+          ))}
+        </div>
+
+        {filteredTodos.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px 20px", color: "#5c627e" }}>
             <Check size={32} style={{ color: "#2a2f48", marginBottom: 10 }} />
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, color: "#9aa0bf" }}>No tasks yet</p>

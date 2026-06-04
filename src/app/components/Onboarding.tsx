@@ -61,8 +61,8 @@ export function Onboarding() {
   if (onboarded) return null;
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.86)", backdropFilter: "blur(10px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div style={{ width: "100%", maxWidth: 430, background: "#0c0e18", borderTop: `1px solid ${accent}30`, borderRadius: "26px 26px 0 0", padding: "26px 22px calc(28px + env(safe-area-inset-bottom,0px))", animation: "sheetUp 0.4s cubic-bezier(0.22,1,0.36,1)" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.86)", backdropFilter: "blur(10px)", display: "flex", alignItems: step === "auth" ? "flex-start" : "flex-end", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 430, background: "#0c0e18", borderTop: step === "auth" ? "none" : `1px solid ${accent}30`, borderBottom: step === "auth" ? `1px solid ${accent}30` : "none", borderRadius: step === "auth" ? "0 0 26px 26px" : "26px 26px 0 0", padding: step === "auth" ? "calc(28px + env(safe-area-inset-top,0px)) 22px 26px" : "26px 22px calc(28px + env(safe-area-inset-bottom,0px))", animation: `${step === "auth" ? "sheetDown" : "sheetUp"} 0.4s cubic-bezier(0.22,1,0.36,1)` }}>
         {step === "auth" ? (
           <>
             <div style={{ width: 56, height: 56, borderRadius: 18, background: `linear-gradient(135deg, ${accent}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 28px ${accent}50`, marginBottom: 16 }}>
@@ -105,7 +105,7 @@ export function Onboarding() {
           </>
         )}
       </div>
-      <style>{`@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
+      <style>{`@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}@keyframes sheetDown{from{transform:translateY(-100%)}to{transform:translateY(0)}}`}</style>
     </div>
   );
 }

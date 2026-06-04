@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
-import { Bell, Wifi, Shield, LogOut, Info, Sliders, Globe, CheckCircle, Upload, UserPlus, Trash2, Pencil, Check, X } from "lucide-react";
+import { Bell, Wifi, Shield, LogOut, Info, Sliders, Globe, CheckCircle, Upload, UserPlus, Trash2, Pencil, Check, X, ChevronRight } from "lucide-react";
 import { useAccent, ACCENT_COLORS } from "../AccentContext";
 import { useApp, type RoboTeam } from "../AppContext";
 import { TeamSearch } from "../TeamSearch";
 import { readFileAsDataUrl, downscaleImage } from "../media";
+import { sendInviteEmail } from "../../../services/api";
 
 const PRESET_AVATARS = ["🤖", "⚙️", "🦾", "🔧", "⚡", "🏆", "🚀", "🎯", "🛠️", "🔩", "🧠", "🦿"];
 
@@ -29,11 +30,8 @@ interface SettingRowProps {
   danger?: boolean;
 }
 function SettingRow({ icon, iconBg, label, sub, right, onClick, danger }: SettingRowProps) {
-  return (
-    <button
-      onClick={onClick}
-      style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 0", background: "transparent", border: "none", cursor: onClick ? "pointer" : "default", textAlign: "left" }}
-    >
+  const content = (
+    <>
       <div style={{ width: 36, height: 36, borderRadius: 10, background: iconBg ?? "#1a1e30", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         {icon}
       </div>
@@ -42,6 +40,18 @@ function SettingRow({ icon, iconBg, label, sub, right, onClick, danger }: Settin
         {sub && <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#7a80a0", marginTop: 1 }}>{sub}</p>}
       </div>
       {right ?? (onClick && !danger ? <ChevronRight size={14} style={{ color: "#4a5070", flexShrink: 0 }} /> : null)}
+    </>
+  );
+  const rowStyle = { width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 0", background: "transparent", border: "none", cursor: onClick ? "pointer" : "default", textAlign: "left" as const };
+  if (!onClick) {
+    return <div style={rowStyle}>{content}</div>;
+  }
+  return (
+    <button
+      onClick={onClick}
+      style={rowStyle}
+    >
+      {content}
     </button>
   );
 }
@@ -59,7 +69,7 @@ function SectionDivider() {
   return <div style={{ height: 1, background: "rgba(255,255,255,0.05)" }} />;
 }
 
-export function SettingsPage() {
+export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
   const { accent, setAccent } = useAccent();
   const { profile, team, teammates, signedIn, isGuest, setTeam, updateProfile, addTeammate, removeTeammate, signOut, setOnboarded } = useApp();
   const [notifications, setNotifications] = useState(true);
@@ -71,6 +81,9 @@ export function SettingsPage() {
   const [editName, setEditName] = useState(false);
   const [nameDraft, setNameDraft] = useState(profile?.name ?? "");
   const [mate, setMate] = useState({ name: "", email: "" });
+  const [notice, setNotice] = useState<string | null>(null);
+  const [units, setUnits] = useState("Imperial (in, lbs)");
+  const [inviteBusy, setInviteBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function onAvatarFile(f: File | null) {
@@ -79,6 +92,21 @@ export function SettingsPage() {
     const small = await downscaleImage(raw, 256, 0.8);
     updateProfile({ avatar: small });
     setShowAvatar(false);
+  }
+
+  async function inviteTeammate() {
+    if (!/\S+@\S+\.\S+/.test(mate.email) || inviteBusy) return;
+    setInviteBusy(true);
+    addTeammate(mate);
+    try {
+      const result = await sendInviteEmail({ name: mate.name || mate.email, email: mate.email, teamNumber: team?.number, senderName: profile?.name });
+      setNotice(result.message ?? "Invite saved. Configure an email provider on the server for real email delivery.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Invite saved locally, but email delivery is not configured.");
+    } finally {
+      setMate({ name: "", email: "" });
+      setInviteBusy(false);
+    }
   }
 
   return (
@@ -147,7 +175,7 @@ export function SettingsPage() {
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
               <input value={mate.name} onChange={(e) => setMate({ ...mate, name: e.target.value })} placeholder="Name" style={{ width: 90, background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "9px 10px", color: "#e8eaf0", outline: "none", fontSize: 13 }} />
               <input value={mate.email} onChange={(e) => setMate({ ...mate, email: e.target.value })} placeholder="teammate@email.com" style={{ flex: 1, background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "9px 10px", color: "#e8eaf0", outline: "none", fontSize: 13 }} />
-              <button onClick={() => { if (/\S+@\S+\.\S+/.test(mate.email)) { addTeammate(mate); setMate({ name: "", email: "" }); } }} style={{ width: 40, borderRadius: 10, background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}><UserPlus size={17} style={{ color: "#08090f" }} /></button>
+              <button onClick={inviteTeammate} style={{ width: 40, borderRadius: 10, background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, opacity: inviteBusy ? 0.6 : 1 }}><UserPlus size={17} style={{ color: "#08090f" }} /></button>
             </div>
           </div>
         </Section>
@@ -233,16 +261,16 @@ export function SettingsPage() {
           <SettingRow
             icon={<Sliders size={16} style={{ color: "#7a80a0" }} />}
             label="API Configuration"
-            sub="RobotEvents, VEX API keys"
-            onClick={() => {}}
+            sub="RobotEvents, Google Auth, AI, email"
+            onClick={() => setNotice("Server env needed: ROBOTEVENTS_API_TOKEN, VITE_GOOGLE_CLIENT_ID, GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI for full OAuth, one AI key such as GROQ_API_KEY/OpenAI/OpenRouter/DeepSeek, DATABASE_URL or Supabase for realtime messaging, and RESEND_API_KEY or SENDGRID_API_KEY plus INVITE_FROM_EMAIL for teammate email invites.")}
           />
           <SectionDivider />
           <SettingRow
             icon={<Globe size={16} style={{ color: "#ff8c00" }} />}
             iconBg="#ff8c0015"
             label="Units"
-            sub="Imperial (in, lbs)"
-            onClick={() => {}}
+            sub={units}
+            onClick={() => setUnits((u) => (u.startsWith("Imperial") ? "Metric (mm, kg)" : "Imperial (in, lbs)"))}
           />
         </Section>
 
@@ -250,14 +278,14 @@ export function SettingsPage() {
         <Section title="ABOUT">
           <SettingRow icon={<Info size={16} style={{ color: "#7a80a0" }} />} label="RoboLab" sub="Version 1.0.0 · Build 2025.06.04" />
           <SectionDivider />
-          <SettingRow icon={<span style={{ fontSize: 16 }}>📄</span>} label="Privacy Policy" onClick={() => {}} />
+          <SettingRow icon={<span style={{ fontSize: 16 }}>📄</span>} label="Privacy Policy" onClick={() => setNotice("RoboLab keeps RobotEvents tokens and AI keys server-side. Messages are workspace-only in this MVP and local until a database/realtime service is configured.")} />
           <SectionDivider />
-          <SettingRow icon={<span style={{ fontSize: 16 }}>⚖️</span>} label="Terms of Service" onClick={() => {}} />
+          <SettingRow icon={<span style={{ fontSize: 16 }}>⚖️</span>} label="Terms of Service" onClick={() => setNotice("Predictions and AI suggestions are educational estimates. Teams should verify rules, match schedules, and judging requirements with official event staff.")} />
         </Section>
 
         {/* Sign out */}
         <button
-          onClick={() => signOut()}
+          onClick={() => (signedIn || isGuest ? signOut() : (setOnboarded(false), onSignIn?.()))}
           style={{ width: "100%", padding: 14, borderRadius: 14, background: "#ff3b5c10", border: "1px solid #ff3b5c30", fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, color: "#ff3b5c", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
         >
           <LogOut size={16} />
@@ -280,6 +308,18 @@ export function SettingsPage() {
             <TeamSearch selectedId={team?.id} onSelect={(t: RoboTeam) => { setTeam(t); setShowTeam(false); }} />
           </div>
           <style>{`@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div onClick={() => setNotice(null)} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", borderTop: `1px solid ${accent}30`, borderRadius: "24px 24px 0 0", padding: "20px 18px calc(24px + env(safe-area-inset-bottom,0px))", animation: "sheetUp 0.35s cubic-bezier(0.22,1,0.36,1)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 19, color: "#fff", margin: 0 }}>RoboLab setup</h3>
+              <button onClick={() => setNotice(null)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
+            </div>
+            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#b0b4c8", lineHeight: 1.6 }}>{notice}</p>
+          </div>
         </div>
       ) : null}
 

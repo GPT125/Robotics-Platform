@@ -70,9 +70,74 @@ export type RoboEvent = {
   name: string;
   start: string;
   end: string;
+  event_type?: string;
+  divisions?: Array<{ id: number; name: string }>;
   season?: { id: number; name: string };
   location?: { city?: string; region?: string; country?: string };
+  level?: string;
 };
+
+export type RoboAward = {
+  id?: number;
+  title?: string;
+  name?: string;
+  event?: { id?: number; name?: string };
+  qualifications?: string[];
+  teamWinners?: Array<{ team?: RoboTeamResult; number?: string; team_name?: string }>;
+  team?: RoboTeamResult;
+  teamNumber?: string;
+};
+
+export type RoboRanking = {
+  id?: number;
+  rank?: number;
+  team?: RoboTeamResult;
+  team_id?: number;
+  team_number?: string;
+  wins?: number;
+  losses?: number;
+  ties?: number;
+  wp?: number;
+  ap?: number;
+  sp?: number;
+  high_score?: number;
+  average_points?: number;
+};
+
+export type RoboSkills = {
+  id?: number;
+  rank?: number;
+  team?: RoboTeamResult;
+  team_id?: number;
+  team_number?: string;
+  score?: number;
+  programming?: number;
+  driver?: number;
+  autonomous?: number;
+};
+
+export type RoboAlliance = {
+  color?: "red" | "blue" | string;
+  score?: number | null;
+  teams?: Array<{ team?: RoboTeamResult; number?: string; team_name?: string; id?: number } | RoboTeamResult>;
+};
+
+export type RoboMatch = {
+  id: number;
+  name?: string;
+  round?: number;
+  instance?: number;
+  matchnum?: number;
+  field?: string;
+  scheduled?: string | null;
+  started?: string | null;
+  scored?: boolean;
+  alliances?: RoboAlliance[];
+  event?: { id?: number; name?: string; sku?: string };
+  division?: { id?: number; name?: string };
+};
+
+type DataList<T> = { data?: T[] };
 
 export async function teamEvents(teamId: number): Promise<RoboEvent[]> {
   try {
@@ -81,4 +146,133 @@ export async function teamEvents(teamId: number): Promise<RoboEvent[]> {
   } catch {
     return [];
   }
+}
+
+export async function searchEvents(query: string): Promise<RoboEvent[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const attempts = [`/events?search=${encodeURIComponent(q)}&per_page=30`, `/events?sku%5B%5D=${encodeURIComponent(q)}&per_page=30`];
+  for (const path of attempts) {
+    try {
+      const json = await robotEvents<DataList<RoboEvent>>(path);
+      if (Array.isArray(json.data) && json.data.length) return json.data.sort((a, b) => (a.start < b.start ? 1 : -1));
+    } catch {
+      // Try the next supported RobotEvents query shape.
+    }
+  }
+  return [];
+}
+
+export async function teamMatches(teamId: number): Promise<RoboMatch[]> {
+  try {
+    const json = await robotEvents<DataList<RoboMatch>>(`/teams/${teamId}/matches?per_page=100`);
+    return Array.isArray(json.data) ? json.data.sort((a, b) => String(b.scheduled ?? b.started ?? "").localeCompare(String(a.scheduled ?? a.started ?? ""))) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function teamAwards(teamId: number): Promise<RoboAward[]> {
+  try {
+    const json = await robotEvents<DataList<RoboAward>>(`/teams/${teamId}/awards?per_page=100`);
+    return Array.isArray(json.data) ? json.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function eventTeams(eventId: number): Promise<RoboTeamResult[]> {
+  try {
+    const json = await robotEvents<DataList<RoboTeamResult>>(`/events/${eventId}/teams?per_page=250`);
+    return Array.isArray(json.data) ? json.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function eventMatches(eventId: number): Promise<RoboMatch[]> {
+  try {
+    const json = await robotEvents<DataList<RoboMatch>>(`/events/${eventId}/matches?per_page=250`);
+    return Array.isArray(json.data) ? json.data.sort((a, b) => (a.matchnum ?? 0) - (b.matchnum ?? 0)) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function eventAwards(eventId: number): Promise<RoboAward[]> {
+  try {
+    const json = await robotEvents<DataList<RoboAward>>(`/events/${eventId}/awards?per_page=100`);
+    return Array.isArray(json.data) ? json.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function eventRankings(eventId: number): Promise<RoboRanking[]> {
+  try {
+    const json = await robotEvents<DataList<RoboRanking>>(`/events/${eventId}/rankings?per_page=250`);
+    return Array.isArray(json.data) ? json.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function eventSkills(eventId: number): Promise<RoboSkills[]> {
+  try {
+    const json = await robotEvents<DataList<RoboSkills>>(`/events/${eventId}/skills?per_page=250`);
+    return Array.isArray(json.data) ? json.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export function teamNumberFromWinner(winner: RoboAward): string {
+  const first = winner.teamWinners?.[0];
+  return winner.team?.number ?? winner.teamNumber ?? first?.team?.number ?? first?.number ?? "";
+}
+
+export function teamNameFromWinner(winner: RoboAward): string {
+  const first = winner.teamWinners?.[0];
+  return winner.team?.team_name ?? first?.team?.team_name ?? first?.team_name ?? "";
+}
+
+export function allianceTeams(alliance: RoboAlliance | undefined): RoboTeamResult[] {
+  const teams = alliance?.teams ?? [];
+  return teams
+    .map((entry) => {
+      const maybe = entry as unknown as { team?: RoboTeamResult; number?: string; team_name?: string; id?: number };
+      return maybe.team ?? (typeof maybe.number === "string" ? ({ id: maybe.id ?? 0, number: maybe.number, team_name: maybe.team_name ?? maybe.number, organization: "" } satisfies RoboTeamResult) : null);
+    })
+    .filter((t): t is RoboTeamResult => Boolean(t?.number));
+}
+
+export function matchLabel(match: RoboMatch): string {
+  if (match.name) return match.name;
+  const prefix = match.round && match.round > 2 ? "Elim" : "Q";
+  return `${prefix}${match.matchnum ?? match.instance ?? match.id}`;
+}
+
+export function matchAlliances(match: RoboMatch) {
+  const red = match.alliances?.find((a) => a.color === "red") ?? match.alliances?.[0];
+  const blue = match.alliances?.find((a) => a.color === "blue") ?? match.alliances?.[1];
+  return { red, blue, redTeams: allianceTeams(red), blueTeams: allianceTeams(blue) };
+}
+
+export async function sendInviteEmail(input: { name: string; email: string; teamNumber?: string; senderName?: string }) {
+  const response = await fetch('/api/invites/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const json = (await response.json().catch(() => ({}))) as { ok?: boolean; data?: { message?: string }; error?: { message?: string } };
+  if (!response.ok || !json.ok) throw new Error(json.error?.message ?? `Invite request failed (${response.status})`);
+  return json.data ?? {};
+}
+
+export async function sendPredictionFeedback(input: { matchId: string; predicted: string; actual: string }) {
+  await fetch('/api/predictions/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).catch(() => undefined);
 }
