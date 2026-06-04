@@ -1,4 +1,7 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite';
+import path from 'path';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 type ServerReq = { url?: string; method?: string; headers?: Record<string, string | string[] | undefined>; on: (event: string, callback: (chunk?: Buffer) => void) => void };
 type ServerRes = { statusCode: number; setHeader: (key: string, value: string) => void; end: (body: string) => void };
@@ -804,7 +807,10 @@ function platformApi(mode: string): Plugin {
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [platformApi(mode)],
+  plugins: [react(), tailwindcss(), platformApi(mode)],
+  resolve: {
+    alias: { '@': path.resolve(__dirname, './src') },
+  },
   server: {
     port: 5173,
     host: true,
