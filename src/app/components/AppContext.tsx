@@ -41,6 +41,14 @@ export type ScoutNote = {
   id: string;
   teamId: string;
   teamName: string;
+  matchId?: string;
+  matchLabel?: string;
+  eventId?: number;
+  eventName?: string;
+  allianceColor?: "red" | "blue";
+  opponents?: string[];
+  result?: "win" | "loss" | "tie" | "unscored";
+  score?: string;
   tags: string[];
   description: string;
   ratings: ScoutRatings;
@@ -206,7 +214,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value: AppCtx = {
     ...state,
     signInGoogle: ({ name, email, picture }) =>
-      setState((s) => ({ ...s, signedIn: true, isGuest: false, profile: { name: name || email.split("@")[0], email, avatar: s.profile?.avatar || picture || initials(name || email) } })),
+      setState((s) => ({
+        ...s,
+        signedIn: true,
+        isGuest: false,
+        profile: { name: name || email.split("@")[0], email, avatar: s.profile?.avatar || picture || initials(name || email) },
+        notifications: [
+          {
+            id: uid(),
+            type: "info",
+            title: "Welcome to RoboLab",
+            body: "Your robotics command center is ready. Select your team to unlock live match results, awards, scouting notes, and AI strategy.",
+            createdAt: Date.now(),
+            seen: false,
+          },
+          ...s.notifications,
+        ].slice(0, 20),
+      })),
     continueAsGuest: () => setState((s) => ({ ...s, isGuest: true, signedIn: false, onboarded: true, profile: s.profile ?? { name: "Guest", email: null, avatar: "🤖" } })),
     signOut: () => setState((s) => ({ ...initial, todos: s.todos })),
     setOnboarded: (v) => setState((s) => ({ ...s, onboarded: v })),

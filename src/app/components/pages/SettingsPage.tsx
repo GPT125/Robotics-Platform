@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Bell, Wifi, Shield, LogOut, Info, Sliders, Globe, CheckCircle, Upload, UserPlus, Trash2, Pencil, Check, X, ChevronRight } from "lucide-react";
+import { Bell, Wifi, Shield, LogOut, Info, CheckCircle, Upload, UserPlus, Trash2, Pencil, Check, X, ChevronRight } from "lucide-react";
 import { useAccent, ACCENT_COLORS } from "../AccentContext";
 import { useApp, type RoboTeam } from "../AppContext";
 import { TeamSearch } from "../TeamSearch";
@@ -82,7 +82,6 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
   const [nameDraft, setNameDraft] = useState(profile?.name ?? "");
   const [mate, setMate] = useState({ name: "", email: "" });
   const [notice, setNotice] = useState<string | null>(null);
-  const [units, setUnits] = useState("Imperial (in, lbs)");
   const [inviteBusy, setInviteBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -257,21 +256,6 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
             sub="Help improve RoboLab"
             right={<Toggle value={dataSharing} onChange={setDataSharing} accent={accent} />}
           />
-          <SectionDivider />
-          <SettingRow
-            icon={<Sliders size={16} style={{ color: "#7a80a0" }} />}
-            label="API Configuration"
-            sub="RobotEvents, Google Auth, AI, email"
-            onClick={() => setNotice("Server env needed: ROBOTEVENTS_API_TOKEN, VITE_GOOGLE_CLIENT_ID, GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI for full OAuth, one AI key such as GROQ_API_KEY/OpenAI/OpenRouter/DeepSeek, DATABASE_URL or Supabase for realtime messaging, and RESEND_API_KEY or SENDGRID_API_KEY plus INVITE_FROM_EMAIL for teammate email invites.")}
-          />
-          <SectionDivider />
-          <SettingRow
-            icon={<Globe size={16} style={{ color: "#ff8c00" }} />}
-            iconBg="#ff8c0015"
-            label="Units"
-            sub={units}
-            onClick={() => setUnits((u) => (u.startsWith("Imperial") ? "Metric (mm, kg)" : "Imperial (in, lbs)"))}
-          />
         </Section>
 
         {/* About */}
@@ -299,34 +283,35 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
 
       {/* Change team modal */}
       {showTeam ? (
-        <div onClick={() => setShowTeam(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", borderTop: `1px solid ${accent}30`, borderRadius: "24px 24px 0 0", padding: "20px 18px calc(24px + env(safe-area-inset-bottom,0px))", animation: "sheetUp 0.35s cubic-bezier(0.22,1,0.36,1)" }}>
+        <div onClick={() => setShowTeam(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0", boxSizing: "border-box" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 20, color: "#fff", margin: 0 }}>Change team</h3>
               <button onClick={() => setShowTeam(false)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
             </div>
             <TeamSearch selectedId={team?.id} onSelect={(t: RoboTeam) => { setTeam(t); setShowTeam(false); }} />
           </div>
-          <style>{`@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
+          <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
         </div>
       ) : null}
 
       {notice ? (
-        <div onClick={() => setNotice(null)} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", borderTop: `1px solid ${accent}30`, borderRadius: "24px 24px 0 0", padding: "20px 18px calc(24px + env(safe-area-inset-bottom,0px))", animation: "sheetUp 0.35s cubic-bezier(0.22,1,0.36,1)" }}>
+        <div onClick={() => setNotice(null)} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0", boxSizing: "border-box" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 19, color: "#fff", margin: 0 }}>RoboLab setup</h3>
               <button onClick={() => setNotice(null)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
             </div>
             <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#b0b4c8", lineHeight: 1.6 }}>{notice}</p>
           </div>
+          <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
         </div>
       ) : null}
 
       {/* Avatar picker modal */}
       {showAvatar ? (
-        <div onClick={() => setShowAvatar(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", borderTop: `1px solid ${accent}30`, borderRadius: "24px 24px 0 0", padding: "20px 18px calc(24px + env(safe-area-inset-bottom,0px))", animation: "sheetUp 0.35s cubic-bezier(0.22,1,0.36,1)" }}>
+        <div onClick={() => setShowAvatar(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0", boxSizing: "border-box" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 20, color: "#fff", margin: 0 }}>Profile picture</h3>
               <button onClick={() => setShowAvatar(false)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
@@ -341,7 +326,7 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
             </button>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => onAvatarFile(e.target.files?.[0] ?? null)} />
           </div>
-          <style>{`@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}`}</style>
+          <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
         </div>
       ) : null}
     </div>

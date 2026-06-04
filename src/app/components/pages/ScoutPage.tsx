@@ -67,11 +67,9 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", flexDirection: "column" }}>
-      {/* Backdrop */}
-      <div style={{ flex: 1, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={onClose} />
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "58px 14px 0", boxSizing: "border-box", background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
       {/* Sheet */}
-      <div style={{ background: "#0d0f1c", borderRadius: "20px 20px 0 0", border: "1px solid rgba(255,255,255,0.1)", maxHeight: "88vh", overflowY: "auto", scrollbarWidth: "none" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, boxSizing: "border-box", background: "#0d0f1c", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)", maxHeight: "84vh", overflowY: "auto", scrollbarWidth: "none", boxShadow: "0 18px 60px rgba(0,0,0,0.45)", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)" }}>
         {/* Handle */}
         <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 0" }}>
           <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)" }} />
@@ -186,6 +184,7 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
           </button>
         </div>
       </div>
+      <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
     </div>
   );
 }
@@ -202,6 +201,8 @@ export function ScoutPage() {
     (n) =>
       n.teamId.toLowerCase().includes(query.toLowerCase()) ||
       n.teamName.toLowerCase().includes(query.toLowerCase()) ||
+      (n.matchLabel?.toLowerCase().includes(query.toLowerCase()) ?? false) ||
+      (n.eventName?.toLowerCase().includes(query.toLowerCase()) ?? false) ||
       n.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()))
   );
 
@@ -238,7 +239,7 @@ export function ScoutPage() {
             </div>
             <div>
               <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color: "#e8eaf0" }}>{selected.teamName}</p>
-              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>Avg Rating: {avgRating(selected.ratings)} / 5</p>
+              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>{selected.matchLabel ? `${selected.matchLabel} · ` : ""}Avg Rating: {avgRating(selected.ratings)} / 5</p>
             </div>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -280,6 +281,16 @@ export function ScoutPage() {
                 <img key={i} src={img} alt="" style={{ width: 88, height: 88, borderRadius: 10, objectFit: "cover", border: "1px solid rgba(255,255,255,0.1)" }} />
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Description */}
+        {selected.matchLabel && (
+          <div style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16 }}>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", marginBottom: 8 }}>Match Context</p>
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#7a80a0", lineHeight: 1.6 }}>
+              {selected.matchLabel}{selected.eventName ? ` · ${selected.eventName}` : ""}{selected.score ? ` · ${selected.score}` : ""}{selected.opponents?.length ? ` · vs ${selected.opponents.join(", ")}` : ""}
+            </p>
           </div>
         )}
 
@@ -345,7 +356,7 @@ export function ScoutPage() {
               </div>
               <div style={{ flex: 1 }}>
                 <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 15, color: "#e8eaf0" }}>{note.teamName}</p>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>{note.date} · Avg {avgRating(note.ratings)}/5</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>{note.matchLabel ? `${note.matchLabel} · ` : ""}{note.date} · Avg {avgRating(note.ratings)}/5</p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 {note.images.length > 0 && <Image size={12} style={{ color: "#7a80a0" }} />}

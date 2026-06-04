@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, BrainCircuit, Sparkles, Link2, ChevronDown, ImagePlus, Camera, X, Mic, MicOff } from "lucide-react";
+import { Send, BrainCircuit, Sparkles, Link2, ChevronDown, ImagePlus, Camera, X, Mic, MicOff, Menu, Plus, Edit3, Check } from "lucide-react";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
-import { askCoach, type CoachSource } from "../../../services/api";
+import { askCoach, matchAlliances, matchLabel, teamAwards, teamEvents, teamMatches, type CoachSource, type RoboAward, type RoboEvent, type RoboMatch } from "../../../services/api";
 import { downscaleImage, readFileAsDataUrl, extractVideoFrames } from "../media";
 
 type Attachment = { id: string; kind: "image" | "video"; preview: string; images: string[] };
 type Message = { role: "user" | "ai"; text: string; time: string; sources?: CoachSource[]; images?: string[] };
+type CoachSession = { id: string; title: string; messages: Message[]; createdAt: number; updatedAt: number };
 type SpeechRecognitionLike = {
   continuous: boolean;
   interimResults: boolean;
@@ -29,6 +30,83 @@ const quickPrompts = [
 
 function getTime() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+const COACH_KEY = "robolab:coach-sessions:v1";
+
+function sid() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function starterMessage(): Message {
+  return {
+    role: "ai",
+    text: "Hey! I'm **RoboLab AI**. Ask me anything — strategy, autonomous, driver skills, alliance picks, or robot fixes. You can also attach a **photo or video** of your robot and I'll tell you what to improve. 🤖",
+    time: getTime(),
+  };
+}
+
+function titleFromMessage(text: string) {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "New chat";
+  return cleaned.length > 34 ? `${cleaned.slice(0, 34).trim()}...` : cleaned;
+}
+
+function newSession(title = "New chat"): CoachSession {
+  const now = Date.now();
+  return { id: sid(), title, messages: [starterMessage()], createdAt: now, updatedAt: now };
+}
+
+function loadSessions(): CoachSession[] {
+  if (typeof window === "undefined") return [newSession()];
+  try {
+    const raw = window.localStorage.getItem(COACH_KEY);
+    const parsed = raw ? JSON.parse(raw) as CoachSession[] : [];
+    const valid = Array.isArray(parsed)
+      ? parsed.filter((s) => s?.id && Array.isArray(s.messages)).map((s) => ({
+          ...s,
+          title: s.title || "New chat",
+          createdAt: s.createdAt || Date.now(),
+          updatedAt: s.updatedAt || s.createdAt || Date.now(),
+        }))
+      : [];
+    return valid.length ? valid.sort((a, b) => b.updatedAt - a.updatedAt) : [newSession()];
+  } catch {
+    return [newSession()];
+  }
+}
+
+function shortDate(value?: string | null) {
+  if (!value) return "TBD";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "TBD" : d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function awardTitle(award: RoboAward) {
+  return award.title ?? award.name ?? "Award";
+}
+
+function scoreForTeam(match: RoboMatch, teamNumber: string) {
+  const { red, blue, redTeams, blueTeams } = matchAlliances(match);
+  const redScore = Number(red?.score);
+  const blueScore = Number(blue?.score);
+  if (Number.isNaN(redScore) || Number.isNaN(blueScore)) return null;
+  const isRed = redTeams.some((t) => t.number === teamNumber);
+  const isBlue = blueTeams.some((t) => t.number === teamNumber);
+  if (!isRed && !isBlue) return null;
+  const ours = isRed ? redScore : blueScore;
+  const theirs = isRed ? blueScore : redScore;
+  return { ours, theirs, won: ours > theirs };
+}
+
+function teamStats(matches: RoboMatch[], teamNumber: string) {
+  const scored = matches.map((m) => scoreForTeam(m, teamNumber)).filter((s): s is NonNullable<typeof s> => Boolean(s));
+  const wins = scored.filter((s) => s.won).length;
+  const losses = scored.length - wins;
+  const avg = scored.length ? Math.round(scored.reduce((sum, s) => sum + s.ours, 0) / scored.length) : null;
+  const max = scored.length ? Math.max(...scored.map((s) => s.ours)) : null;
+  const winRate = scored.length ? Math.round((wins / scored.length) * 100) : null;
+  return { scored, wins, losses, avg, max, winRate };
 }
 
 function escapeHtml(s: string) {
@@ -89,25 +167,36 @@ function Sources({ sources, accent }: { sources: CoachSource[]; accent: string }
 export function CoachPage() {
   const { accent } = useAccent();
   const { team, profile } = useApp();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "ai",
-      text: "Hey! I'm **RoboLab AI**. Ask me anything — strategy, autonomous, driver skills, alliance picks, or robot fixes. You can also attach a **photo or video** of your robot and I'll tell you what to improve. 🤖",
-      time: getTime(),
-    },
-  ]);
+  const [sessions, setSessions] = useState<CoachSession[]>(loadSessions);
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [processing, setProcessing] = useState(false);
   const [listening, setListening] = useState(false);
+  const [robotEventsData, setRobotEventsData] = useState<{ events: RoboEvent[]; matches: RoboMatch[]; awards: RoboAward[] }>({ events: [], matches: [], awards: [] });
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceBaseRef = useRef("");
+  const voiceFinalRef = useRef("");
   const endRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0];
+  const messages = activeSession?.messages ?? [];
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping, attachments]);
+
+  useEffect(() => {
+    if (!activeSessionId && sessions[0]) setActiveSessionId(sessions[0].id);
+  }, [activeSessionId, sessions]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem(COACH_KEY, JSON.stringify(sessions)); } catch { /* ignore */ }
+  }, [sessions]);
 
   // Auto-grow the textarea (expands upward because the bar is anchored at the bottom)
   useEffect(() => {
@@ -117,10 +206,61 @@ export function CoachPage() {
     ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
   }, [input]);
 
+  useEffect(() => {
+    let alive = true;
+    if (!team) {
+      setRobotEventsData({ events: [], matches: [], awards: [] });
+      return;
+    }
+    Promise.all([teamEvents(team.id), teamMatches(team.id), teamAwards(team.id)])
+      .then(([events, matches, awards]) => {
+        if (alive) setRobotEventsData({ events, matches, awards });
+      })
+      .catch(() => {
+        if (alive) setRobotEventsData({ events: [], matches: [], awards: [] });
+      });
+    return () => { alive = false; };
+  }, [team?.id]);
+
+  function updateSessionMessages(sessionId: string, updater: (prev: Message[]) => Message[]) {
+    setSessions((prev) => prev.map((session) => {
+      if (session.id !== sessionId) return session;
+      const nextMessages = updater(session.messages);
+      const firstUser = nextMessages.find((m) => m.role === "user")?.text ?? "";
+      const nextTitle = session.title === "New chat" && firstUser ? titleFromMessage(firstUser) : session.title;
+      return { ...session, title: nextTitle, messages: nextMessages, updatedAt: Date.now() };
+    }).sort((a, b) => b.updatedAt - a.updatedAt));
+  }
+
+  function startNewChat() {
+    const session = newSession();
+    setSessions((prev) => [session, ...prev]);
+    setActiveSessionId(session.id);
+    setSidebarOpen(false);
+    setInput("");
+    setAttachments([]);
+  }
+
+  function renameSession(id: string, title: string) {
+    const clean = title.trim() || "New chat";
+    setSessions((prev) => prev.map((session) => session.id === id ? { ...session, title: clean, updatedAt: Date.now() } : session));
+    setRenameId(null);
+  }
+
   function platformContext() {
+    const stats = team ? teamStats(robotEventsData.matches, team.number) : null;
+    const recentMatches = team ? robotEventsData.matches.slice(0, 8).map((match) => {
+      const score = scoreForTeam(match, team.number);
+      return `${matchLabel(match)}${match.event?.name ? ` at ${match.event.name}` : ""}: ${score ? `${score.won ? "win" : "loss"} ${score.ours}-${score.theirs}` : "scheduled/unscored"}`;
+    }).join("; ") : "";
     const parts = [
       team ? `Our team: ${team.number} ${team.team_name} (${team.organization}).` : "No team selected yet.",
       profile?.name ? `User: ${profile.name}.` : "",
+      stats && stats.scored.length ? `Official RobotEvents stats for ${team?.number}: ${stats.wins} wins, ${stats.losses} losses, ${stats.winRate}% win rate, ${stats.avg ?? "unknown"} average score, ${stats.max ?? "unknown"} max score.` : "",
+      robotEventsData.events.length ? `Recent RobotEvents events: ${robotEventsData.events.slice(0, 6).map((e) => `${e.name} (${shortDate(e.start)})`).join("; ")}.` : "",
+      robotEventsData.awards.length ? `RobotEvents awards: ${robotEventsData.awards.slice(0, 6).map(awardTitle).join("; ")}.` : "",
+      recentMatches ? `Recent matches: ${recentMatches}.` : "",
+      "Use official RobotEvents data and saved RoboLab context when available. If a team fact is missing, say the data is missing instead of guessing.",
     ];
     return parts.filter(Boolean).join(" ");
   }
@@ -155,23 +295,26 @@ export function CoachPage() {
     }
     const SpeechRecognition = win.SpeechRecognition ?? win.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setMessages((prev) => [...prev, { role: "ai", text: "Voice input is not available in this browser. Use Chrome or Safari, or type your message.", time: getTime() }]);
+      if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "Voice input is not available in this browser. Use Chrome or Safari, or type your message.", time: getTime() }]);
       return;
     }
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
-    let finalText = "";
+    voiceBaseRef.current = input.trim();
+    voiceFinalRef.current = "";
     recognition.onresult = (event) => {
       let interim = "";
+      let finalText = voiceFinalRef.current;
       for (let i = 0; i < event.results.length; i++) {
         const item = event.results[i];
-        if (item.isFinal) finalText += item[0].transcript;
+        if (item.isFinal) finalText += ` ${item[0].transcript}`;
         else interim += item[0].transcript;
       }
-      const spoken = `${finalText} ${interim}`.trim();
-      if (spoken) setInput((prev) => (prev ? `${prev.replace(/\s+$/, "")} ${spoken}` : spoken));
+      voiceFinalRef.current = finalText.replace(/\s+/g, " ").trim();
+      const spoken = `${voiceFinalRef.current} ${interim}`.replace(/\s+/g, " ").trim();
+      if (spoken) setInput([voiceBaseRef.current, spoken].filter(Boolean).join(" "));
     };
     recognition.onerror = () => setListening(false);
     recognition.onend = () => setListening(false);
@@ -182,31 +325,35 @@ export function CoachPage() {
 
   const send = async (text: string) => {
     const q = text.trim();
-    if ((!q && !attachments.length) || isTyping) return;
+    if ((!q && !attachments.length) || isTyping || !activeSession) return;
+    const sessionId = activeSession.id;
     const sending = attachments;
     const images = sending.flatMap((a) => a.images);
     const previews = sending.map((a) => a.preview);
     const history = messages.map((m) => ({ role: (m.role === "ai" ? "assistant" : "user") as "assistant" | "user", content: m.text }));
     const userText = q || "Analyze the attached robot media and tell me what to fix.";
-    setMessages((prev) => [...prev, { role: "user", text: userText, time: getTime(), images: previews }]);
+    updateSessionMessages(sessionId, (prev) => [...prev, { role: "user", text: userText, time: getTime(), images: previews }]);
     setInput("");
     setAttachments([]);
     setIsTyping(true);
     try {
       const result = await askCoach({ messages: [...history, { role: "user", content: userText }], context: platformContext(), images });
-      setMessages((prev) => [...prev, { role: "ai", text: result.answer, time: getTime(), sources: result.sources }]);
+      updateSessionMessages(sessionId, (prev) => [...prev, { role: "ai", text: result.answer, time: getTime(), sources: result.sources }]);
     } catch (err) {
-      setMessages((prev) => [...prev, { role: "ai", text: err instanceof Error ? err.message : "I could not reach the AI right now — please try again.", time: getTime() }]);
+      updateSessionMessages(sessionId, (prev) => [...prev, { role: "ai", text: err instanceof Error ? err.message : "I could not reach the AI right now — please try again.", time: getTime() }]);
     } finally {
       setIsTyping(false);
     }
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: 78 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: 78, position: "relative" }}>
       {/* Header */}
       <div style={{ padding: "16px 16px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(10,11,20,0.8)", backdropFilter: "blur(12px)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => setSidebarOpen((open) => !open)} style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+            <Menu size={16} style={{ color: "#e8eaf0" }} />
+          </button>
           <div style={{ width: 36, height: 36, borderRadius: "50%", background: `linear-gradient(135deg, ${accent} 0%, #7c3aed 100%)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 16px ${accent}40` }}>
             <BrainCircuit size={17} style={{ color: "#fff" }} />
           </div>
@@ -220,6 +367,54 @@ export function CoachPage() {
           <Sparkles size={16} style={{ color: accent, opacity: 0.7, marginLeft: "auto" }} />
         </div>
       </div>
+
+      {sidebarOpen ? (
+        <div style={{ position: "absolute", top: 0, bottom: 78, left: 0, width: "82%", maxWidth: 326, background: "rgba(13,15,28,0.98)", borderRight: "1px solid rgba(255,255,255,0.1)", zIndex: 40, boxShadow: "20px 0 48px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "16px 14px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.1em" }}>SAVED AI CHATS</p>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 17, color: "#e8eaf0" }}>RoboLab Coach</p>
+            </div>
+            <button onClick={startNewChat} style={{ width: 34, height: 34, borderRadius: 10, background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: `0 0 14px ${accent}40` }}>
+              <Plus size={17} style={{ color: "#08090f" }} />
+            </button>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "10px 10px 18px", display: "flex", flexDirection: "column", gap: 8, scrollbarWidth: "none" }}>
+            {sessions.map((session) => {
+              const active = session.id === activeSession?.id;
+              const renaming = renameId === session.id;
+              return (
+                <div key={session.id} style={{ background: active ? `${accent}16` : "rgba(255,255,255,0.035)", border: `1px solid ${active ? accent + "35" : "rgba(255,255,255,0.07)"}`, borderRadius: 13, padding: "10px 11px" }}>
+                  {renaming ? (
+                    <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
+                      <input
+                        value={titleDraft}
+                        onChange={(e) => setTitleDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") renameSession(session.id, titleDraft); }}
+                        autoFocus
+                        style={{ flex: 1, minWidth: 0, background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 9, padding: "8px 9px", color: "#e8eaf0", fontFamily: "'Inter', sans-serif", fontSize: 12, outline: "none" }}
+                      />
+                      <button onClick={() => renameSession(session.id, titleDraft)} style={{ width: 30, height: 30, borderRadius: 9, background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <Check size={14} style={{ color: "#08090f" }} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <button onClick={() => { setActiveSessionId(session.id); setSidebarOpen(false); }} style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", textAlign: "left", cursor: "pointer" }}>
+                        <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, color: "#e8eaf0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.title}</p>
+                        <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0", marginTop: 3 }}>{new Date(session.updatedAt).toLocaleDateString([], { month: "short", day: "numeric" })} · {Math.max(0, session.messages.length - 1)} messages</p>
+                      </button>
+                      <button onClick={() => { setRenameId(session.id); setTitleDraft(session.title); }} style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <Edit3 size={12} style={{ color: "#7a80a0" }} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {/* Messages */}
       <div style={{ flex: 1, overflowY: "auto", padding: "14px", display: "flex", flexDirection: "column", gap: 12, scrollbarWidth: "none", minHeight: 0 }}>
@@ -308,6 +503,13 @@ export function CoachPage() {
           <button onClick={toggleVoice} style={{ width: 34, height: 34, borderRadius: 10, background: listening ? `${accent}20` : "transparent", border: listening ? `1px solid ${accent}35` : "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
             {listening ? <MicOff size={17} style={{ color: accent }} /> : <Mic size={17} style={{ color: "rgba(255,255,255,0.5)" }} />}
           </button>
+          {listening ? (
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: `${accent}10`, border: `1px solid ${accent}25`, display: "flex", alignItems: "center", justifyContent: "center", gap: 3, flexShrink: 0 }}>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <span key={i} style={{ width: 3, height: 12 + i * 2, borderRadius: 3, background: accent, opacity: 0.7, transformOrigin: "center", animation: `voiceWave 0.85s ${i * 0.08}s ease-in-out infinite` }} />
+              ))}
+            </div>
+          ) : null}
           <textarea
             ref={taRef}
             value={input}
@@ -323,7 +525,7 @@ export function CoachPage() {
         </div>
       </div>
 
-      <style>{`@keyframes typingBounce {0%,60%,100%{transform:translateY(0);opacity:0.5;}30%{transform:translateY(-6px);opacity:1;}}`}</style>
+      <style>{`@keyframes typingBounce {0%,60%,100%{transform:translateY(0);opacity:0.5;}30%{transform:translateY(-6px);opacity:1;}} @keyframes voiceWave {0%,100%{transform:scaleY(0.45);opacity:0.45;}50%{transform:scaleY(1.35);opacity:1;}}`}</style>
     </div>
   );
 }

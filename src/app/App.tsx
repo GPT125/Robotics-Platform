@@ -28,7 +28,7 @@ export default function App() {
     lookup: <LookupPage />,
     coach: <CoachPage />,
     scout: <ScoutPage />,
-    messages: <MessagesPage />,
+    messages: <MessagesPage onSignIn={() => setForceOnboarding(true)} />,
     settings: <SettingsPage onSignIn={() => setForceOnboarding(true)} />,
     todos: <TodoPage onBack={() => setActivePage("home")} />,
   };
@@ -58,7 +58,7 @@ export default function App() {
             </div>
 
             {!isSubPage ? <BottomNav active={activePage} onChange={setActivePage} /> : null}
-            {activePage !== "settings" || forceOnboarding ? <Onboarding /> : null}
+            {activePage !== "settings" || forceOnboarding ? <Onboarding forceAuth={forceOnboarding} onComplete={() => setForceOnboarding(false)} /> : null}
           </div>
         </div>
         <style>{`

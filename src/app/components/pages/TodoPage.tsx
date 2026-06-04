@@ -42,6 +42,13 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
   });
   const open = filteredTodos.filter((t) => !t.done);
   const done = filteredTodos.filter((t) => t.done);
+  const total = filteredTodos.length;
+  const completion = total ? Math.round((done.length / total) * 100) : 0;
+  const criticalCount = open.filter((t) => t.priority === "critical" || t.flagged).length;
+  const dueToday = filteredTodos.filter((t) => {
+    const today = new Date().toISOString().slice(0, 10);
+    return !t.done && (t.due === today || t.alertAt?.startsWith(today));
+  }).length;
 
   function add() {
     if (!title.trim()) return;
@@ -98,8 +105,10 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
 
   function Row({ t }: { t: Todo }) {
     const isOpen = expanded === t.id;
+    const priorityColor = pColor(t.priority) ?? (t.done ? "#10b981" : "#2a2f48");
     return (
-      <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ background: "#111320", border: `1px solid ${t.priority ? priorityColor + "30" : "rgba(255,255,255,0.07)"}`, borderRadius: 14, overflow: "hidden", position: "relative", boxShadow: t.flagged ? "0 0 18px rgba(245,158,11,0.08)" : "none" }}>
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: priorityColor, opacity: t.done ? 0.35 : 0.9 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 14px" }}>
           <button onClick={() => toggleTodo(t.id)} style={{ width: 22, height: 22, borderRadius: 7, border: `2px solid ${t.done ? accent : "rgba(255,255,255,0.25)"}`, background: t.done ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
             {t.done ? <Check size={13} style={{ color: "#08090f" }} /> : null}
@@ -107,6 +116,8 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
           <div style={{ flex: 1, minWidth: 0 }} onClick={() => setExpanded(isOpen ? null : t.id)}>
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 600, fontSize: 14, color: t.done ? "#5c627e" : "#e8eaf0", textDecoration: t.done ? "line-through" : "none", cursor: "pointer" }}>{t.title}</p>
             <div style={{ display: "flex", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: t.done ? "#10b981" : accent, background: t.done ? "#10b98116" : `${accent}14`, padding: "1px 6px", borderRadius: 5 }}>{t.status}</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 5 }}>{t.section}</span>
               {t.priority ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: pColor(t.priority), background: `${pColor(t.priority)}1a`, padding: "1px 6px", borderRadius: 5 }}><Flag size={9} />{t.priority}</span> : null}
               {t.tags.map((tg) => <span key={tg} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#9aa0bf", background: "rgba(255,255,255,0.06)", padding: "1px 6px", borderRadius: 5 }}>#{tg}</span>)}
               {t.assignee ? <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9, color: accent }}>@{t.assignee}</span> : null}
@@ -189,6 +200,33 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
       </div>
 
       <div style={{ padding: "0 16px" }}>
+        <div style={{ background: "linear-gradient(135deg, #111320 0%, #12142a 100%)", border: `1px solid ${accent}25`, borderRadius: 18, padding: 16, marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
+            <div>
+              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}>TEAM TASK HEALTH</p>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 20, color: "#fff", marginTop: 2 }}>{completion}% complete</p>
+            </div>
+            <div style={{ width: 48, height: 48, borderRadius: 15, background: `${accent}18`, border: `1px solid ${accent}35`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Check size={22} style={{ color: accent }} />
+            </div>
+          </div>
+          <div style={{ height: 8, background: "rgba(255,255,255,0.06)", borderRadius: 8, overflow: "hidden", marginBottom: 12 }}>
+            <div style={{ width: `${completion}%`, height: "100%", background: `linear-gradient(90deg, ${accent}, #10b981)`, borderRadius: 8, transition: "width 0.25s" }} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {[
+              { label: "OPEN", value: open.length, color: accent },
+              { label: "DUE", value: dueToday, color: "#ff8c00" },
+              { label: "FOCUS", value: criticalCount, color: "#ff3b5c" },
+            ].map((item) => (
+              <div key={item.label} style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "9px 8px", textAlign: "center" }}>
+                <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 18, color: item.color }}>{item.value}</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8.5, color: "#7a80a0", marginTop: 1 }}>{item.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Add */}
         <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 14, marginBottom: 16 }}>
           <div style={{ display: "flex", gap: 8 }}>

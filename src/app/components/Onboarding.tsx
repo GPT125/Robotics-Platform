@@ -15,7 +15,7 @@ function decodeJwt(token: string): { name?: string; email?: string; picture?: st
   }
 }
 
-export function Onboarding() {
+export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: boolean; onComplete?: () => void }) {
   const { accent } = useAccent();
   const { signedIn, isGuest, team, onboarded, signInGoogle, continueAsGuest, setTeam, setOnboarded } = useApp();
   const [step, setStep] = useState<"auth" | "team">("auth");
@@ -25,9 +25,10 @@ export function Onboarding() {
 
   // Decide step
   useEffect(() => {
+    if (forceAuth && !signedIn) { setStep("auth"); return; }
     if (signedIn || isGuest) setStep("team");
     else setStep("auth");
-  }, [signedIn, isGuest]);
+  }, [forceAuth, signedIn, isGuest]);
 
   // Google Identity Services button
   useEffect(() => {
@@ -80,7 +81,7 @@ export function Onboarding() {
               </div>
             ) : null}
 
-            <button onClick={continueAsGuest} style={{ width: "100%", background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: "13px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 600, fontSize: 14, cursor: "pointer" }}>Continue as guest</button>
+            <button onClick={() => { continueAsGuest(); onComplete?.(); }} style={{ width: "100%", background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: "13px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 600, fontSize: 14, cursor: "pointer" }}>Continue as guest</button>
             <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#5c627e", textAlign: "center", marginTop: 12 }}>Guests can browse, but messages, shared to-dos, and team sync need sign-in.</p>
           </>
         ) : (
@@ -96,12 +97,12 @@ export function Onboarding() {
 
             <button
               disabled={!picked}
-              onClick={() => { if (picked) { setTeam(picked); } setOnboarded(true); }}
+              onClick={() => { if (picked) { setTeam(picked); } setOnboarded(true); onComplete?.(); }}
               style={{ width: "100%", marginTop: 16, background: picked ? accent : "rgba(255,255,255,0.06)", border: "none", borderRadius: 14, padding: "14px", color: picked ? "#08090f" : "#5c627e", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 15, cursor: picked ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: picked ? `0 0 20px ${accent}50` : "none" }}
             >
               {picked ? <>Continue as {picked.number} <ArrowRight size={16} /></> : "Select your team"}
             </button>
-            <button onClick={() => setOnboarded(true)} style={{ width: "100%", marginTop: 8, background: "transparent", border: "none", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 13, cursor: "pointer", padding: 8 }}>Skip for now</button>
+            <button onClick={() => { setOnboarded(true); onComplete?.(); }} style={{ width: "100%", marginTop: 8, background: "transparent", border: "none", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 13, cursor: "pointer", padding: 8 }}>Skip for now</button>
           </>
         )}
       </div>

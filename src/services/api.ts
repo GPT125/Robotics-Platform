@@ -83,9 +83,14 @@ export type RoboAward = {
   name?: string;
   event?: { id?: number; name?: string };
   qualifications?: string[];
-  teamWinners?: Array<{ team?: RoboTeamResult; number?: string; team_name?: string }>;
+  teamWinners?: Array<{ team?: RoboTeamResult; number?: string; team_number?: string; team_name?: string; name?: string; id?: number }>;
+  team_winners?: Array<{ team?: RoboTeamResult; number?: string; team_number?: string; team_name?: string; name?: string; id?: number }>;
+  winners?: Array<{ team?: RoboTeamResult; number?: string; team_number?: string; team_name?: string; name?: string; id?: number }>;
+  teams?: Array<{ team?: RoboTeamResult; number?: string; team_number?: string; team_name?: string; name?: string; id?: number }>;
   team?: RoboTeamResult;
   teamNumber?: string;
+  team_number?: string;
+  team_name?: string;
 };
 
 export type RoboRanking = {
@@ -226,14 +231,45 @@ export async function eventSkills(eventId: number): Promise<RoboSkills[]> {
   }
 }
 
+type AwardWinnerEntry = NonNullable<RoboAward["teamWinners"]>[number];
+
+function awardWinnerEntries(winner: RoboAward): AwardWinnerEntry[] {
+  return [
+    ...(winner.teamWinners ?? []),
+    ...(winner.team_winners ?? []),
+    ...(winner.winners ?? []),
+    ...(winner.teams ?? []),
+  ];
+}
+
+export function awardWinnerTeams(winner: RoboAward): RoboTeamResult[] {
+  const direct = winner.team
+    ?? (winner.teamNumber || winner.team_number ? {
+      id: 0,
+      number: winner.teamNumber ?? winner.team_number ?? "",
+      team_name: winner.team_name ?? winner.teamNumber ?? winner.team_number ?? "",
+      organization: "",
+    } : null);
+  const nested = awardWinnerEntries(winner).map((entry) => {
+    if (entry.team?.number) return entry.team;
+    const number = entry.number ?? entry.team_number ?? "";
+    if (!number) return null;
+    return {
+      id: entry.id ?? 0,
+      number,
+      team_name: entry.team_name ?? entry.name ?? number,
+      organization: "",
+    } satisfies RoboTeamResult;
+  }).filter((team): team is RoboTeamResult => Boolean(team?.number));
+  return [...(direct?.number ? [direct] : []), ...nested].filter((team, index, arr) => arr.findIndex((t) => t.number === team.number) === index);
+}
+
 export function teamNumberFromWinner(winner: RoboAward): string {
-  const first = winner.teamWinners?.[0];
-  return winner.team?.number ?? winner.teamNumber ?? first?.team?.number ?? first?.number ?? "";
+  return awardWinnerTeams(winner).map((team) => team.number).join(", ");
 }
 
 export function teamNameFromWinner(winner: RoboAward): string {
-  const first = winner.teamWinners?.[0];
-  return winner.team?.team_name ?? first?.team?.team_name ?? first?.team_name ?? "";
+  return awardWinnerTeams(winner).map((team) => team.team_name).filter(Boolean).join(", ");
 }
 
 export function allianceTeams(alliance: RoboAlliance | undefined): RoboTeamResult[] {

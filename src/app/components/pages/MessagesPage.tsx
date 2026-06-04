@@ -26,7 +26,7 @@ function AttachmentPreview({ att }: { att: ChatAttachment }) {
   return <img src={att.url} alt={att.name} style={{ width: 88, height: 88, objectFit: "cover", borderRadius: 12, border: "1px solid rgba(255,255,255,0.1)" }} />;
 }
 
-export function MessagesPage() {
+export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
   const { accent } = useAccent();
   const { signedIn, profile, team, conversations, addConversation, sendConversationMessage, markConversationRead, setOnboarded } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -82,7 +82,7 @@ export function MessagesPage() {
         <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: "#7a80a0", textAlign: "center", lineHeight: 1.6, marginBottom: 36, maxWidth: 280 }}>
           Sign in with Google to message teammates by email inside your RoboLab workspace.
         </p>
-        <button onClick={() => setOnboarded(false)} style={{ width: "100%", maxWidth: 340, padding: "14px", borderRadius: 14, background: accent, border: "none", fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, color: "#08090f", cursor: "pointer", boxShadow: `0 0 20px ${accent}40`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <button onClick={() => { setOnboarded(false); onSignIn?.(); }} style={{ width: "100%", maxWidth: 340, padding: "14px", borderRadius: 14, background: accent, border: "none", fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, color: "#08090f", cursor: "pointer", boxShadow: `0 0 20px ${accent}40`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
           Sign in with Google
         </button>
         <div style={{ marginTop: 28, display: "flex", alignItems: "center", gap: 6 }}>
@@ -231,9 +231,8 @@ export function MessagesPage() {
       </div>
 
       {showNewConvo && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", flexDirection: "column" }}>
-          <div style={{ flex: 1, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={() => setShowNewConvo(false)} />
-          <div style={{ background: "#0d0f1c", borderRadius: "20px 20px 0 0", border: "1px solid rgba(255,255,255,0.1)", padding: "0 18px 36px" }}>
+        <div onClick={() => setShowNewConvo(false)} style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0", boxSizing: "border-box", background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 402, background: "#0d0f1c", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)", padding: "0 18px 24px", boxShadow: "0 18px 60px rgba(0,0,0,0.45)", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)" }}>
             <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 8px" }}><div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)" }} /></div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
               <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 17, color: "#e8eaf0" }}>New Message</p>
@@ -254,6 +253,7 @@ export function MessagesPage() {
               </button>
             </div>
           </div>
+          <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
         </div>
       )}
     </div>

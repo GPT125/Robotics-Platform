@@ -12,6 +12,19 @@ function shortDate(value?: string | null) {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function schoolYear(value?: string | null) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const start = d.getMonth() >= 7 ? y : y - 1;
+  return `${start}-${String(start + 1).slice(2)}`;
+}
+
+function mostRecentSchoolYear(events: RoboEvent[]) {
+  return events.map((e) => schoolYear(e.start)).filter(Boolean).sort().reverse()[0] ?? "";
+}
+
 function city(event: RoboEvent) {
   return [event.location?.city, event.location?.region].filter(Boolean).join(", ") || event.location?.country || "Location TBD";
 }
@@ -32,6 +45,13 @@ function matchScore(match: RoboMatch, teamNumber: string) {
   const ours = side.color === "red" ? redScore : blueScore;
   const theirs = side.color === "red" ? blueScore : redScore;
   return { ours, theirs, won: ours > theirs, label: `${ours}-${theirs}`, side };
+}
+
+function notificationColor(type?: string) {
+  if (type === "match_win") return "#10b981";
+  if (type === "match_loss") return "#ff8c00";
+  if (type === "award") return "#f59e0b";
+  return "#00c8ff";
 }
 
 function awardTitle(award: RoboAward) {
@@ -83,7 +103,9 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
     addNotification({
       type: score.won ? "match_win" : "match_loss",
       title: score.won ? `${team.number} won ${matchLabel(latest)}` : `${team.number} finished ${matchLabel(latest)}`,
-      body: score.won ? `Great job. Final score ${score.label}.` : `Final score ${score.label}. Log scout notes while it is fresh.`,
+      body: score.won
+        ? `Nice work. ${team.number} beat ${score.side.opponents.map((t) => t.number).join(", ") || "the opposing alliance"} ${score.label}.`
+        : `Final score ${score.label} against ${score.side.opponents.map((t) => t.number).join(", ") || "the opposing alliance"}. Capture notes now and use it to improve the next match.`,
     });
     localStorage.setItem(key, "1");
   }, [addNotification, matches, team]);
@@ -96,7 +118,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
     addNotification({
       type: "award",
       title: `${team.number} award update`,
-      body: `${awardTitle(latestAward)} appears in official RobotEvents awards for this team.`,
+      body: `${awardTitle(latestAward)} was posted in official RobotEvents awards${latestAward.event?.name ? ` for ${latestAward.event.name}` : ""}.`,
     });
     localStorage.setItem(key, "1");
   }, [addNotification, awards, team]);
@@ -110,6 +132,9 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
   const nextMatch = team ? matches.find((m) => !matchScore(m, team.number) && teamSide(m, team.number)) : null;
   const freshLabel = stale ? "Stale" : loading ? "Updating" : team ? "Fresh" : "Offline";
   const visibleNotification = notifications.find((n) => !n.seen) ?? notifications[0];
+  const nColor = notificationColor(visibleNotification?.type);
+  const currentSchoolYear = mostRecentSchoolYear(events);
+  const visibleEvents = currentSchoolYear ? events.filter((e) => schoolYear(e.start) === currentSchoolYear) : events;
 
   return (
     <div style={{ padding: "20px 16px 110px", display: "flex", flexDirection: "column", gap: 18 }}>
@@ -213,7 +238,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
       <div>
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, color: "#e8eaf0", marginBottom: 10 }}>Team Events</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {events.slice(0, 3).map((e) => (
+          {visibleEvents.slice(0, 3).map((e) => (
             <button key={e.id} onClick={() => onNavigate?.("lookup")} style={{ background: "linear-gradient(135deg, #111320 0%, #12142a 100%)", border: `1px solid ${accent}18`, borderRadius: 14, padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", textAlign: "left" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <div style={{ background: `${accent}15`, borderRadius: 10, padding: 8 }}>
@@ -227,15 +252,17 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
               <ChevronRight size={14} style={{ color: "#7a80a0" }} />
             </button>
           ))}
-          {!events.length ? <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 16, color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 12 }}>{team ? "No official events found yet." : "Select a team to load tournament history."}</div> : null}
+          {!visibleEvents.length ? <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 16, color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 12 }}>{team ? "No official events found for the latest school year." : "Select a team to load tournament history."}</div> : null}
         </div>
       </div>
 
-      <div style={{ background: "#ff8c0012", border: "1px solid #ff8c0035", borderRadius: 14, padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <AlertCircle size={16} style={{ color: "#ff8c00", flexShrink: 0, marginTop: 1 }} />
+      <div style={{ background: `linear-gradient(135deg, ${nColor}18, rgba(17,19,32,0.92))`, border: `1px solid ${nColor}35`, borderRadius: 16, padding: "13px 14px", display: "flex", gap: 11, alignItems: "flex-start", boxShadow: `0 0 22px ${nColor}10` }}>
+        <div style={{ width: 32, height: 32, borderRadius: 11, background: `${nColor}18`, border: `1px solid ${nColor}35`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          {visibleNotification?.type === "award" ? <Trophy size={16} style={{ color: nColor }} /> : <AlertCircle size={16} style={{ color: nColor }} />}
+        </div>
         <div>
-          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 12, color: "#ff8c00" }}>{visibleNotification?.title ?? "RoboLab is ready"}</p>
-          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#7a80a0", marginTop: 2 }}>{visibleNotification?.body ?? "Choose your team, then RoboLab will show official match results, awards, and scouting reminders."}</p>
+          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: nColor }}>{visibleNotification?.title ?? "RoboLab is ready"}</p>
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#b0b4c8", marginTop: 3, lineHeight: 1.45 }}>{visibleNotification?.body ?? "Choose your team, then RoboLab will show official match results, awards, and scouting reminders."}</p>
         </div>
       </div>
 
