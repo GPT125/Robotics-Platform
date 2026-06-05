@@ -248,19 +248,48 @@ export function CoachPage() {
   }
 
   function platformContext() {
+    const now = Date.now();
     const stats = team ? teamStats(robotEventsData.matches, team.number) : null;
     const recentMatches = team ? robotEventsData.matches.slice(0, 8).map((match) => {
       const score = scoreForTeam(match, team.number);
       return `${matchLabel(match)}${match.event?.name ? ` at ${match.event.name}` : ""}: ${score ? `${score.won ? "win" : "loss"} ${score.ours}-${score.theirs}` : "scheduled/unscored"}`;
     }).join("; ") : "";
+
+    // Next upcoming match (field, time, opponents, partner) for match-aware answers.
+    let nextMatchLine = "";
+    if (team) {
+      const upcoming = robotEventsData.matches
+        .filter((m) => !m.scored && m.scheduled && new Date(m.scheduled).getTime() >= now - 3_600_000)
+        .sort((a, b) => new Date(a.scheduled as string).getTime() - new Date(b.scheduled as string).getTime());
+      const nm = upcoming[0];
+      if (nm) {
+        const { redTeams, blueTeams } = matchAlliances(nm);
+        const onRed = redTeams.some((t) => t.number === team.number);
+        const opp = (onRed ? blueTeams : redTeams).map((t) => t.number).filter(Boolean).join(", ");
+        const partner = (onRed ? redTeams : blueTeams).map((t) => t.number).filter((n) => n && n !== team.number).join(", ");
+        const when = nm.scheduled ? new Date(nm.scheduled).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) : "time TBD";
+        nextMatchLine = `NEXT MATCH (soon): ${matchLabel(nm)}${nm.field ? ` on ${nm.field}` : ""} at ${when}${nm.event?.name ? ` (${nm.event.name})` : ""}. We are ${onRed ? "Red" : "Blue"}, partner ${partner || "TBD"}, vs ${opp || "TBD"}.`;
+      }
+    }
+
+    // Next upcoming tournament.
+    const upcomingEvents = robotEventsData.events
+      .filter((e) => e.start && new Date(e.end || e.start).getTime() >= now)
+      .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    const ne = upcomingEvents[0];
+    const nextEventLine = ne ? `NEXT TOURNAMENT: ${ne.name} on ${shortDate(ne.start)}${ne.location?.city ? ` in ${ne.location.city}` : ""}.` : "";
+
     const parts = [
-      team ? `Our team: ${team.number} ${team.team_name} (${team.organization}).` : "No team selected yet.",
+      `Today is ${new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" })}.`,
+      team ? `Our team: ${team.number} ${team.team_name} (${team.organization}), program ${team.program?.code ?? "VEX"}.` : "No team selected yet.",
       profile?.name ? `User: ${profile.name}.` : "",
+      nextMatchLine,
+      nextEventLine,
       stats && stats.scored.length ? `Official RobotEvents stats for ${team?.number}: ${stats.wins} wins, ${stats.losses} losses, ${stats.winRate}% win rate, ${stats.avg ?? "unknown"} average score, ${stats.max ?? "unknown"} max score.` : "",
       robotEventsData.events.length ? `Recent RobotEvents events: ${robotEventsData.events.slice(0, 6).map((e) => `${e.name} (${shortDate(e.start)})`).join("; ")}.` : "",
       robotEventsData.awards.length ? `RobotEvents awards: ${robotEventsData.awards.slice(0, 6).map(awardTitle).join("; ")}.` : "",
       recentMatches ? `Recent matches: ${recentMatches}.` : "",
-      "Use official RobotEvents data and saved RoboLab context when available. If a team fact is missing, say the data is missing instead of guessing.",
+      "Use official RobotEvents data and saved RoboLab context when available. If a team fact is missing, say the data is missing instead of guessing. If the next match is soon, naturally acknowledge it.",
     ];
     return parts.filter(Boolean).join(" ");
   }

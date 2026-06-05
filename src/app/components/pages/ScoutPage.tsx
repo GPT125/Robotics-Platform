@@ -75,13 +75,12 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
           <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)" }} />
         </div>
 
-        <div style={{ padding: "12px 18px 30px", display: "flex", flexDirection: "column", gap: 20 }}>
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color: "#e8eaf0" }}>Add Scout Note</p>
-            <button onClick={onClose} style={{ background: "rgba(255,255,255,0.07)", border: "none", borderRadius: 10, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-              <X size={15} style={{ color: "#e8eaf0" }} />
-            </button>
+        <div style={{ padding: "8px 18px 30px", display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* Header (sticky) with Cancel + Done */}
+          <div style={{ position: "sticky", top: 0, zIndex: 2, background: "#0d0f1c", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0 10px", margin: "-8px 0 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <button onClick={onClose} style={{ background: "transparent", border: "none", cursor: "pointer", fontFamily: "'Inter', sans-serif", fontSize: 14, color: "#7a80a0", padding: "6px 2px" }}>Cancel</button>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 16, color: "#e8eaf0" }}>Add Scout Note</p>
+            <button onClick={handleSave} disabled={!selectedTeam} style={{ background: selectedTeam ? accent : "rgba(255,255,255,0.08)", border: "none", borderRadius: 10, padding: "7px 16px", cursor: selectedTeam ? "pointer" : "default", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, color: selectedTeam ? "#08090f" : "#5c627e" }}>Done</button>
           </div>
 
           {/* Team picker */}

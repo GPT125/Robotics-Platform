@@ -279,8 +279,6 @@ function platformApi(mode: string): Plugin {
       '/api/messages/ai/strategy',
       '/api/messages/ai/picklist',
       '/api/messages/mark-read',
-      '/api/invites/send',
-      '/api/predictions/feedback',
       '/api/robot-lab/analyze',
       '/api/robot-lab/parts/confirm',
     ];
@@ -547,6 +545,59 @@ function platformApi(mode: string): Plugin {
     );
   }
 
+  async function inviteHandler(req: ServerReq, res: ServerRes) {
+    if (!req.url?.startsWith('/api/invites/send')) return false;
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method !== 'POST') { res.statusCode = 405; res.end(JSON.stringify({ ok: false, error: { code: 'method_not_allowed', message: 'Use POST.' } })); return true; }
+    const body = await readJsonBody(req);
+    const email = String(body.email ?? '').trim();
+    const name = String(body.name ?? '').trim() || 'teammate';
+    const teamNumber = String(body.teamNumber ?? '').trim();
+    const senderName = String(body.senderName ?? 'Your RoboLab teammate').trim();
+    if (!/\S+@\S+\.\S+/.test(email)) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: { code: 'bad_email', message: 'A valid email is required.' } })); return true; }
+    const from = env.INVITE_FROM_EMAIL || 'RoboLab <onboarding@resend.dev>';
+    if (!configured(env.RESEND_API_KEY)) {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ ok: true, data: { delivered: false, message: 'RESEND_API_KEY not set — invite saved locally but no email was sent.' } }));
+      return true;
+    }
+    try {
+      const subject = `${senderName} invited you to RoboLab${teamNumber ? ` (team ${teamNumber})` : ''}`;
+      const html = `<div style="font-family:Inter,Arial,sans-serif;background:#08090f;color:#e8eaf0;padding:28px;border-radius:16px">
+        <h2 style="color:#00c8ff;margin:0 0 8px">You're invited to RoboLab 🤖</h2>
+        <p>Hi ${name}, <b>${senderName}</b> invited you to join${teamNumber ? ` team <b>${teamNumber}</b>` : ''} on RoboLab — the VEX command center for scouting, AI coaching, shared to-dos, and messaging.</p>
+        <p>Open the app and sign in with this email (${email}) to connect to your team.</p>
+        <p style="color:#7a80a0;font-size:12px;margin-top:24px">If you weren't expecting this, you can ignore this email.</p>
+      </div>`;
+      const resp = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, to: [email], subject, html }),
+      });
+      const json = record(await resp.json().catch(() => ({})));
+      if (!resp.ok) throw new Error(String(record(json).message ?? `Resend returned ${resp.status}`));
+      res.statusCode = 200;
+      res.end(JSON.stringify({ ok: true, data: { delivered: true, id: json.id ?? null, message: `Invite sent to ${email}.` } }));
+    } catch (error) {
+      res.statusCode = 502;
+      res.end(JSON.stringify({ ok: false, error: { code: 'send_failed', message: error instanceof Error ? error.message : 'Email send failed.' } }));
+    }
+    return true;
+  }
+
+  // Persist wrong AI predictions so future estimates can be corrected (append-only log).
+  const predictionFeedback: Array<{ at: number; matchId: string; predicted: string; actual: string }> = [];
+  async function predictionFeedbackHandler(req: ServerReq, res: ServerRes) {
+    if (!req.url?.startsWith('/api/predictions/feedback')) return false;
+    res.setHeader('Content-Type', 'application/json');
+    const body = await readJsonBody(req);
+    predictionFeedback.push({ at: Date.now(), matchId: String(body.matchId ?? ''), predicted: String(body.predicted ?? ''), actual: String(body.actual ?? '') });
+    if (predictionFeedback.length > 500) predictionFeedback.shift();
+    res.statusCode = 200;
+    res.end(JSON.stringify({ ok: true, data: { recorded: predictionFeedback.length } }));
+    return true;
+  }
+
   async function coachHandler(req: ServerReq, res: ServerRes) {
     if (!req.url?.startsWith('/api/ai/coach')) return false;
     res.setHeader('Content-Type', 'application/json');
@@ -791,6 +842,8 @@ function platformApi(mode: string): Plugin {
         if (await googleAuthHandler(req as ServerReq, res)) return;
         if (await mockRouteHandler(req as ServerReq, res)) return;
         if (await robotEventsHandler(req as ServerReq, res)) return;
+        if (await inviteHandler(req as ServerReq, res)) return;
+        if (await predictionFeedbackHandler(req as ServerReq, res)) return;
         if (await coachHandler(req as ServerReq, res)) return;
         if (await aiHandler(req as ServerReq, res)) return;
         if (await statusHandler(req as ServerReq, res)) return;
@@ -803,6 +856,8 @@ function platformApi(mode: string): Plugin {
         if (await googleAuthHandler(req as ServerReq, res)) return;
         if (await mockRouteHandler(req as ServerReq, res)) return;
         if (await robotEventsHandler(req as ServerReq, res)) return;
+        if (await inviteHandler(req as ServerReq, res)) return;
+        if (await predictionFeedbackHandler(req as ServerReq, res)) return;
         if (await coachHandler(req as ServerReq, res)) return;
         if (await aiHandler(req as ServerReq, res)) return;
         if (await statusHandler(req as ServerReq, res)) return;
