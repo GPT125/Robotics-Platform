@@ -109,8 +109,8 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
   }
 
   return (
-    <div style={{ overflowY: "auto", height: "100dvh", scrollbarWidth: "none", paddingBottom: 90 }}>
-      <div style={{ padding: "20px 16px 0" }}>
+    <div style={{ overflowY: "auto", height: "100dvh", scrollbarWidth: "none", paddingBottom: "var(--rl-page-bottom)" }}>
+      <div style={{ padding: "var(--rl-page-top) 16px 0" }}>
         {/* Header */}
         <div style={{ marginBottom: 20 }}>
           <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "#7a80a0", letterSpacing: "0.1em" }}>PREFERENCES</p>
@@ -253,16 +253,16 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
             icon={<Shield size={16} style={{ color: "#ff3b5c" }} />}
             iconBg="#ff3b5c15"
             label="Anonymous Data Sharing"
-            sub="Help improve RoboLab"
+            sub="Help improve MatchMind"
             right={<Toggle value={dataSharing} onChange={setDataSharing} accent={accent} />}
           />
         </Section>
 
         {/* About */}
         <Section title="ABOUT">
-          <SettingRow icon={<Info size={16} style={{ color: "#7a80a0" }} />} label="RoboLab" sub="Version 1.0.0 · Build 2025.06.04" />
+          <SettingRow icon={<Info size={16} style={{ color: "#7a80a0" }} />} label="MatchMind" sub="Version 1.0.0 · Build 2025.06.04" />
           <SectionDivider />
-          <SettingRow icon={<span style={{ fontSize: 16 }}>📄</span>} label="Privacy Policy" onClick={() => setNotice("RoboLab keeps RobotEvents tokens and AI keys server-side. Messages are workspace-only in this MVP and local until a database/realtime service is configured.")} />
+          <SettingRow icon={<span style={{ fontSize: 16 }}>📄</span>} label="Privacy Policy" onClick={() => setNotice("MatchMind keeps RobotEvents tokens and AI keys server-side. Messages are workspace-only in this MVP and local until a database/realtime service is configured.")} />
           <SectionDivider />
           <SettingRow icon={<span style={{ fontSize: 16 }}>⚖️</span>} label="Terms of Service" onClick={() => setNotice("Predictions and AI suggestions are educational estimates. Teams should verify rules, match schedules, and judging requirements with official event staff.")} />
         </Section>
@@ -277,7 +277,7 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
         </button>
 
         <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#4a5070", textAlign: "center", marginTop: 16 }}>
-          © 2025–26 RoboLab · Made for robotics competitors
+          © 2025–26 MatchMind · Made for robotics competitors
         </p>
       </div>
 
@@ -299,7 +299,7 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
         <div onClick={() => setNotice(null)} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 19, color: "#fff", margin: 0 }}>RoboLab setup</h3>
+              <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 19, color: "#fff", margin: 0 }}>MatchMind setup</h3>
               <button onClick={() => setNotice(null)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
             </div>
             <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#b0b4c8", lineHeight: 1.6 }}>{notice}</p>

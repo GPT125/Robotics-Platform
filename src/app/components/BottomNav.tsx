@@ -38,7 +38,7 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
         style={{
           display: "flex",
           alignItems: "stretch",
-          padding: "8px 4px 20px",
+          padding: "8px 4px var(--rl-nav-bottom)",
         }}
       >
         {tabs.map(({ id, label, icon: Icon }) => {
@@ -46,6 +46,7 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
           return (
             <button
               key={id}
+              aria-label={label}
               onClick={() => onChange(id)}
               style={{
                 flex: 1,
@@ -72,6 +73,7 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
                   alignItems: "center",
                   justifyContent: "center",
                   transition: "background 0.2s",
+                  pointerEvents: "none",
                 }}
               >
                 <Icon
@@ -96,6 +98,7 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
                   maxWidth: "100%",
+                  pointerEvents: "none",
                 }}
               >
                 {label}

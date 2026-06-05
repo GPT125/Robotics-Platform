@@ -72,7 +72,7 @@ type ChatContent = string | Array<{ type: 'text'; text: string } | { type: 'imag
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: ChatContent };
 
 const DEFAULT_SYSTEM =
-  'You are RoboLab AI, the built-in competition copilot for a VEX V5/V5RC platform. Give concise, practical, safety-aware advice tailored to RoboLab features: live team lookup, tournament history, scouting, alliance selection, VEXcode review, CAD checks, autonomous path planning, and robot troubleshooting. Format the response with short headings and bullets, not markdown tables.';
+  'You are MatchMind AI, the built-in competition copilot for a VEX V5/V5RC platform. Give concise, practical, safety-aware advice tailored to MatchMind features: live team lookup, tournament history, scouting, alliance selection, VEXcode review, CAD checks, autonomous path planning, and robot troubleshooting. Format the response with short headings and bullets, not markdown tables.';
 
 async function callOpenAiCompatible(args: { provider: string; url: string; key?: string; model?: string; prompt?: string; messages?: ChatMessage[]; extraHeaders?: Record<string, string>; temperature?: number; maxTokens?: number }) {
   if (!configured(args.key)) return { provider: args.provider, model: args.model, status: 'missing_key' as const };
@@ -118,7 +118,7 @@ async function callHuggingFace(env: Record<string, string>, prompt: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      inputs: `RoboLab AI for VEX V5/V5RC. Give concise practical advice for scouting, code, CAD, autonomous, alliance selection, and tournament prep.\n\n${prompt}`,
+      inputs: `MatchMind AI for VEX V5/V5RC. Give concise practical advice for scouting, code, CAD, autonomous, alliance selection, and tournament prep.\n\n${prompt}`,
       parameters: { max_new_tokens: 260, return_full_text: false },
     }),
   });
@@ -138,7 +138,7 @@ function deterministicAdvice(task: string, context: string) {
     lower.includes('scout') || lower.includes('match') ? 'Prioritize data users can act on: auton success, driver cycle speed, defense impact, endgame reliability, and failure modes.' : '',
     lower.includes('cad') || lower.includes('part') ? 'Use official VEX CAD downloads or the Onshape VEX V5 parts library for legal parts and dimensions.' : '',
   ].filter(Boolean);
-  return checks.length ? checks.join(' ') : 'RoboLab AI needs a team, robot subsystem, code file, event, or scouting question. Start with the uploaded code, robot configuration, field objective, and observed failure; RoboLab will return an action checklist.';
+  return checks.length ? checks.join(' ') : 'MatchMind AI needs a team, robot subsystem, code file, event, or scouting question. Start with the uploaded code, robot configuration, field objective, and observed failure; MatchMind will return an action checklist.';
 }
 
 async function fetchJsonSummary(source: string, key: string | undefined, url: string, summarize: (json: unknown) => string) {
@@ -220,7 +220,7 @@ async function fetchVexForum(query: string): Promise<ForumSource[]> {
   }
 }
 
-const COACH_SYSTEM = `You are RoboLab AI Coach — a warm, encouraging, and extremely knowledgeable VEX Robotics mentor built into the RoboLab mobile app. You help students (often middle/high schoolers) and coaches. Be compassionate, supportive, and confidence-building. Never condescend. Celebrate effort, reduce stress, and make hard things feel doable.
+const COACH_SYSTEM = `You are MatchMind AI Coach — a warm, encouraging, and extremely knowledgeable VEX Robotics mentor built into the MatchMind mobile app. You help students (often middle/high schoolers) and coaches. Be compassionate, supportive, and confidence-building. Never condescend. Celebrate effort, reduce stress, and make hard things feel doable.
 
 == HOW VEX EVENTS WORK (use this to be scenario-smart) ==
 Programs: V5RC (V5 Robotics Competition, high school + middle school), VIQRC (VEX IQ, elementary/middle, plastic), VEX U (university), VEX AI.
@@ -307,7 +307,7 @@ function platformApi(mode: string): Plugin {
           method: req.method,
           cached: true,
           received: body,
-          message: 'RoboLab API stub. RobotEvents and AI provider secrets remain server-side.',
+          message: 'MatchMind API stub. RobotEvents and AI provider secrets remain server-side.',
         },
       }),
     );
@@ -333,7 +333,7 @@ function platformApi(mode: string): Plugin {
     if (cached && Date.now() - cached.at < robotEventsCacheTtlMs) {
       res.statusCode = cached.status;
       res.setHeader('Content-Type', cached.contentType);
-      res.setHeader('X-RoboLab-Cache', 'hit');
+      res.setHeader('X-MatchMind-Cache', 'hit');
       res.end(cached.body);
       return true;
     }
@@ -343,7 +343,7 @@ function platformApi(mode: string): Plugin {
         headers: {
           Accept: 'application/json',
           Authorization: `Bearer ${token}`,
-          'User-Agent': 'RoboLab/0.1 live RobotEvents adapter',
+          'User-Agent': 'MatchMind/0.1 live RobotEvents adapter',
         },
       });
       const contentType = upstream.headers.get('content-type') ?? 'application/json';
@@ -367,7 +367,7 @@ function platformApi(mode: string): Plugin {
       cache.set(target, { at: Date.now(), body: text, status: upstream.status, contentType });
       res.statusCode = upstream.status;
       res.setHeader('Content-Type', contentType);
-      res.setHeader('X-RoboLab-Cache', 'miss');
+      res.setHeader('X-MatchMind-Cache', 'miss');
       res.end(text);
     } catch (error) {
       res.statusCode = 502;
@@ -396,7 +396,8 @@ function platformApi(mode: string): Plugin {
 
     if (url.pathname === '/api/auth/google/session') {
       const cookieHeader = Array.isArray(req.headers?.cookie) ? req.headers?.cookie.join('; ') : req.headers?.cookie ?? '';
-      const match = String(cookieHeader).match(/(?:^|;\s*)robolab_google_session=([^;]+)/);
+      const match = String(cookieHeader).match(/(?:^|;\s*)matchmind_google_session=([^;]+)/)
+        ?? String(cookieHeader).match(/(?:^|;\s*)robolab_google_session=([^;]+)/);
       const session = match ? googleSessions.get(decodeURIComponent(match[1])) : null;
       res.setHeader('Content-Type', 'application/json');
       res.statusCode = 200;
@@ -487,7 +488,7 @@ function platformApi(mode: string): Plugin {
         const sessionId = `gs-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
         googleSessions.set(sessionId, { email, name, avatarUrl, lastSeenAt: new Date().toISOString() });
         res.statusCode = 302;
-        res.setHeader('Set-Cookie', `robolab_google_session=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`);
+        res.setHeader('Set-Cookie', `matchmind_google_session=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`);
         res.setHeader('Location', '/app/settings?google=connected');
         res.end('');
       } catch {
@@ -514,7 +515,7 @@ function platformApi(mode: string): Plugin {
         model: env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
         messages,
         maxTokens: 850,
-        extraHeaders: { 'HTTP-Referer': env.OPENROUTER_REFERER || 'http://localhost:5173', 'X-Title': 'RoboLab VEX Platform' },
+        extraHeaders: { 'HTTP-Referer': env.OPENROUTER_REFERER || 'http://localhost:5173', 'X-Title': 'MatchMind VEX Platform' },
       }),
       () => callOpenAiCompatible({ provider: 'OpenAI', url: 'https://api.openai.com/v1/chat/completions', key: env.OPENAI_API_KEY, model: env.OPENAI_MODEL || 'gpt-4o-mini', messages, maxTokens: 850 }),
     ];
@@ -530,7 +531,7 @@ function platformApi(mode: string): Plugin {
         model: env.OPENROUTER_VISION_MODEL || 'openai/gpt-4o-mini',
         messages,
         maxTokens: 900,
-        extraHeaders: { 'HTTP-Referer': env.OPENROUTER_REFERER || 'http://localhost:5173', 'X-Title': 'RoboLab VEX Platform' },
+        extraHeaders: { 'HTTP-Referer': env.OPENROUTER_REFERER || 'http://localhost:5173', 'X-Title': 'MatchMind VEX Platform' },
       }),
       () => callOpenAiCompatible({ provider: 'Groq Vision', url: 'https://api.groq.com/openai/v1/chat/completions', key: env.GROQ_API_KEY, model: env.GROQ_VISION_MODEL || 'llama-3.2-90b-vision-preview', messages, maxTokens: 900 }),
     ];
@@ -553,19 +554,19 @@ function platformApi(mode: string): Plugin {
     const email = String(body.email ?? '').trim();
     const name = String(body.name ?? '').trim() || 'teammate';
     const teamNumber = String(body.teamNumber ?? '').trim();
-    const senderName = String(body.senderName ?? 'Your RoboLab teammate').trim();
+    const senderName = String(body.senderName ?? 'Your MatchMind teammate').trim();
     if (!/\S+@\S+\.\S+/.test(email)) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: { code: 'bad_email', message: 'A valid email is required.' } })); return true; }
-    const from = env.INVITE_FROM_EMAIL || 'RoboLab <onboarding@resend.dev>';
+    const from = env.INVITE_FROM_EMAIL || 'MatchMind <onboarding@resend.dev>';
     if (!configured(env.RESEND_API_KEY)) {
       res.statusCode = 200;
       res.end(JSON.stringify({ ok: true, data: { delivered: false, message: 'RESEND_API_KEY not set — invite saved locally but no email was sent.' } }));
       return true;
     }
     try {
-      const subject = `${senderName} invited you to RoboLab${teamNumber ? ` (team ${teamNumber})` : ''}`;
+      const subject = `${senderName} invited you to MatchMind${teamNumber ? ` (team ${teamNumber})` : ''}`;
       const html = `<div style="font-family:Inter,Arial,sans-serif;background:#08090f;color:#e8eaf0;padding:28px;border-radius:16px">
-        <h2 style="color:#00c8ff;margin:0 0 8px">You're invited to RoboLab 🤖</h2>
-        <p>Hi ${name}, <b>${senderName}</b> invited you to join${teamNumber ? ` team <b>${teamNumber}</b>` : ''} on RoboLab — the VEX command center for scouting, AI coaching, shared to-dos, and messaging.</p>
+        <h2 style="color:#00c8ff;margin:0 0 8px">You're invited to MatchMind 🤖</h2>
+        <p>Hi ${name}, <b>${senderName}</b> invited you to join${teamNumber ? ` team <b>${teamNumber}</b>` : ''} on MatchMind — the VEX command center for scouting, AI coaching, shared to-dos, and messaging.</p>
         <p>Open the app and sign in with this email (${email}) to connect to your team.</p>
         <p style="color:#7a80a0;font-size:12px;margin-top:24px">If you weren't expecting this, you can ignore this email.</p>
       </div>`;
@@ -719,8 +720,8 @@ function platformApi(mode: string): Plugin {
 
     if (!answer) {
       const related = sources.length ? `\n\n## Related VEX Forum threads\n${sources.map((source) => `- ${source.title} — ${source.url}`).join('\n')}` : '';
-      answer = `I could not reach an AI model right now, but here is a solid checklist while you retry.\n\n${deterministicAdvice(lastUserText, context)}${related}\n\nConfidence: Low — no AI provider responded, so this is RoboLab's offline checklist.`;
-      provider = 'RoboLab offline';
+      answer = `I could not reach an AI model right now, but here is a solid checklist while you retry.\n\n${deterministicAdvice(lastUserText, context)}${related}\n\nConfidence: Low — no AI provider responded, so this is MatchMind's offline checklist.`;
+      provider = 'MatchMind offline';
     }
 
     const confidence = sources.length >= 2 || drafts.length >= 3 ? 'High' : sources.length >= 1 || drafts.length >= 2 ? 'Medium' : 'Low';
@@ -770,7 +771,7 @@ function platformApi(mode: string): Plugin {
         key: env.OPENROUTER_API_KEY,
         model: env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
         prompt,
-        extraHeaders: { 'HTTP-Referer': env.OPENROUTER_REFERER || 'http://localhost:5173', 'X-Title': 'RoboLab VEX Platform' },
+        extraHeaders: { 'HTTP-Referer': env.OPENROUTER_REFERER || 'http://localhost:5173', 'X-Title': 'MatchMind VEX Platform' },
       }),
       () => callOpenAiCompatible({ provider: 'OpenAI', url: 'https://api.openai.com/v1/chat/completions', key: env.OPENAI_API_KEY, model: env.OPENAI_MODEL || 'gpt-4o-mini', prompt }),
       () => callHuggingFace(env, prompt),
@@ -836,7 +837,7 @@ function platformApi(mode: string): Plugin {
   }
 
   return {
-    name: 'robolab-platform-api',
+    name: 'matchmind-platform-api',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         if (await googleAuthHandler(req as ServerReq, res)) return;

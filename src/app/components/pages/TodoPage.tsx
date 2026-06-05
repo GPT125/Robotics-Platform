@@ -190,8 +190,8 @@ export function TodoPage({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div style={{ minHeight: "100dvh", paddingBottom: 96 }}>
-      <div style={{ padding: "16px 16px 12px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, background: "rgba(8,9,15,0.9)", backdropFilter: "blur(12px)", zIndex: 5 }}>
+    <div style={{ minHeight: "100dvh", paddingBottom: "var(--rl-page-bottom)" }}>
+      <div style={{ padding: "var(--rl-page-top) 16px 12px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, background: "rgba(8,9,15,0.9)", backdropFilter: "blur(12px)", zIndex: 5 }}>
         <button onClick={onBack} style={{ width: 36, height: 36, borderRadius: 11, background: "#181c2e", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><ArrowLeft size={18} style={{ color: "#e8eaf0" }} /></button>
         <div>
           <h1 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 22, color: "#fff", margin: 0 }}>Task Center</h1>

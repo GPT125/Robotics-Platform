@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, BrainCircuit, Sparkles, Link2, ChevronDown, ImagePlus, Camera, X, Mic, MicOff, Menu, Plus, Edit3, Check } from "lucide-react";
+import { Send, BrainCircuit, Sparkles, Link2, ChevronDown, ImagePlus, Camera, X, Mic, Square, Menu, Plus, Edit3, Check, ArrowUp } from "lucide-react";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
 import { askCoach, matchAlliances, matchLabel, searchTeams, teamAwards, teamEvents, teamMatches, type CoachSource, type RoboAward, type RoboEvent, type RoboMatch } from "../../../services/api";
@@ -32,7 +32,8 @@ function getTime() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-const COACH_KEY = "robolab:coach-sessions:v1";
+const COACH_KEY = "matchmind:coach-sessions:v1";
+const LEGACY_COACH_KEY = "robolab:coach-sessions:v1";
 
 function sid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -41,7 +42,7 @@ function sid() {
 function starterMessage(): Message {
   return {
     role: "ai",
-    text: "Hey! I'm **RoboLab AI**. Ask me anything — strategy, autonomous, driver skills, alliance picks, or robot fixes. You can also attach a **photo or video** of your robot and I'll tell you what to improve. 🤖",
+    text: "Hey! I'm **MatchMind AI**. Ask me anything — strategy, autonomous, driver skills, alliance picks, or robot fixes. You can also attach a **photo or video** of your robot and I'll tell you what to improve. 🤖",
     time: getTime(),
   };
 }
@@ -60,7 +61,7 @@ function newSession(title = "New chat"): CoachSession {
 function loadSessions(): CoachSession[] {
   if (typeof window === "undefined") return [newSession()];
   try {
-    const raw = window.localStorage.getItem(COACH_KEY);
+    const raw = window.localStorage.getItem(COACH_KEY) ?? window.localStorage.getItem(LEGACY_COACH_KEY);
     const parsed = raw ? JSON.parse(raw) as CoachSession[] : [];
     const valid = Array.isArray(parsed)
       ? parsed.filter((s) => s?.id && Array.isArray(s.messages)).map((s) => ({
@@ -181,14 +182,17 @@ export function CoachPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [processing, setProcessing] = useState(false);
   const [listening, setListening] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [robotEventsData, setRobotEventsData] = useState<{ events: RoboEvent[]; matches: RoboMatch[]; awards: RoboAward[] }>({ events: [], matches: [], awards: [] });
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const inputRef = useRef("");
   const voiceBaseRef = useRef("");
   const voiceFinalRef = useRef("");
   const manualStopRef = useRef(false);
   const voiceSendAfterStopRef = useRef(false);
   const voiceRestartTimerRef = useRef<number | null>(null);
+  const recordingTimerRef = useRef<number | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0];
@@ -205,6 +209,8 @@ export function CoachPage() {
   useEffect(() => () => {
     manualStopRef.current = true;
     if (voiceRestartTimerRef.current) window.clearTimeout(voiceRestartTimerRef.current);
+    if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+    stopMicStream();
     try { recognitionRef.current?.stop(); } catch { /* ignore */ }
   }, []);
 
@@ -307,7 +313,7 @@ export function CoachPage() {
       robotEventsData.events.length ? `Recent RobotEvents events: ${robotEventsData.events.slice(0, 6).map((e) => `${e.name} (${shortDate(e.start)})`).join("; ")}.` : "",
       robotEventsData.awards.length ? `RobotEvents awards: ${robotEventsData.awards.slice(0, 6).map(awardTitle).join("; ")}.` : "",
       recentMatches ? `Recent matches: ${recentMatches}.` : "",
-      "Use official RobotEvents data and saved RoboLab context when available. If a team fact is missing, say the data is missing instead of guessing. If the next match is soon, naturally acknowledge it.",
+      "Use official RobotEvents data and saved MatchMind context when available. If a team fact is missing, say the data is missing instead of guessing. If the next match is soon, naturally acknowledge it.",
     ];
     return parts.filter(Boolean).join(" ");
   }
@@ -346,7 +352,7 @@ export function CoachPage() {
       currentEvents.length ? `Recent/current events I found: ${currentEvents.join("; ")}.` : "I did not find recent event records for this team in the current RobotEvents response.",
       `Awards: ${awardLine}.`,
       recent.length ? `Recent scored matches: ${recent.join("; ")}.` : "Recent scored match detail is limited, so confidence is medium-low.",
-      "Recommendation: use this official data with your RoboLab scout notes before making alliance or match-strategy decisions.",
+      "Recommendation: use this official data with your MatchMind scout notes before making alliance or match-strategy decisions.",
     ].join("\n\n");
     return {
       answer,
@@ -377,6 +383,23 @@ export function CoachPage() {
     }
   }
 
+  function stopMicStream() {
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+  }
+
+  function finishVoiceSession(shouldSend: boolean) {
+    if (recordingTimerRef.current) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    stopMicStream();
+    recognitionRef.current = null;
+    setListening(false);
+    setRecordingSeconds(0);
+    if (shouldSend && inputRef.current.trim()) window.setTimeout(() => void send(inputRef.current), 0);
+  }
+
   function stopVoice(sendAfterStop = false) {
     manualStopRef.current = true;
     voiceSendAfterStopRef.current = sendAfterStop;
@@ -386,25 +409,30 @@ export function CoachPage() {
     }
     const recognition = recognitionRef.current;
     if (!recognition) {
-      setListening(false);
-      if (sendAfterStop && inputRef.current.trim()) window.setTimeout(() => void send(inputRef.current), 0);
+      finishVoiceSession(sendAfterStop);
       return;
     }
     try {
       recognition.stop();
     } catch {
-      recognitionRef.current = null;
-      setListening(false);
-      if (sendAfterStop && inputRef.current.trim()) window.setTimeout(() => void send(inputRef.current), 0);
+      finishVoiceSession(sendAfterStop);
     }
   }
 
-  function toggleVoice() {
+  async function toggleVoice() {
     const win = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
     if (listening) { stopVoice(false); return; }
     const SpeechRecognition = win.SpeechRecognition ?? win.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "Voice input is not available in this browser. Use Chrome or Safari, or type your message.", time: getTime() }]);
+      return;
+    }
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    } catch {
+      if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "I couldn't access your microphone. Allow mic access for this site, then tap the mic again.", time: getTime() }]);
       return;
     }
     const recognition = new SpeechRecognition();
@@ -433,8 +461,7 @@ export function CoachPage() {
       if (err === "not-allowed" || err === "service-not-allowed" || err === "audio-capture") {
         manualStopRef.current = true;
         voiceSendAfterStopRef.current = false;
-        recognitionRef.current = null;
-        setListening(false);
+        finishVoiceSession(false);
         if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "I couldn't access your microphone. Allow mic access for this site (browser address bar) and tap the mic again.", time: getTime() }]);
       }
     };
@@ -444,9 +471,7 @@ export function CoachPage() {
       if (manualStopRef.current) {
         const shouldSend = voiceSendAfterStopRef.current;
         voiceSendAfterStopRef.current = false;
-        recognitionRef.current = null;
-        setListening(false);
-        if (shouldSend && inputRef.current.trim()) window.setTimeout(() => void send(inputRef.current), 0);
+        finishVoiceSession(shouldSend);
         return;
       }
       voiceRestartTimerRef.current = window.setTimeout(() => {
@@ -455,8 +480,13 @@ export function CoachPage() {
     };
     recognitionRef.current = recognition;
     setListening(true);
-    try { recognition.start(); } catch { recognitionRef.current = null; setListening(false); }
+    setRecordingSeconds(0);
+    if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = window.setInterval(() => setRecordingSeconds((seconds) => seconds + 1), 1000);
+    try { recognition.start(); } catch { finishVoiceSession(false); }
   }
+
+  const voiceTime = `${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, "0")}`;
 
   const send = async (text: string) => {
     const q = text.trim();
@@ -487,9 +517,9 @@ export function CoachPage() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: 78, position: "relative" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: "var(--rl-page-bottom)", position: "relative" }}>
       {/* Header */}
-      <div style={{ padding: "16px 16px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(10,11,20,0.8)", backdropFilter: "blur(12px)", flexShrink: 0 }}>
+      <div style={{ padding: "var(--rl-page-top) 16px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(10,11,20,0.8)", backdropFilter: "blur(12px)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => setSidebarOpen((open) => !open)} style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
             <Menu size={16} style={{ color: "#e8eaf0" }} />
@@ -498,7 +528,7 @@ export function CoachPage() {
             <BrainCircuit size={17} style={{ color: "#fff" }} />
           </div>
           <div>
-            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: "15px", color: "#e8eaf0", lineHeight: 1.1 }}>RoboLab AI</p>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: "15px", color: "#e8eaf0", lineHeight: 1.1 }}>MatchMind AI</p>
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981" }} />
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "#10b981" }}>Online · grounded in VEX Forum</span>
@@ -509,11 +539,11 @@ export function CoachPage() {
       </div>
 
       {sidebarOpen ? (
-        <div style={{ position: "absolute", top: 0, bottom: 78, left: 0, width: "82%", maxWidth: 326, background: "rgba(13,15,28,0.98)", borderRight: "1px solid rgba(255,255,255,0.1)", zIndex: 40, boxShadow: "20px 0 48px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column" }}>
-          <div style={{ padding: "16px 14px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ position: "absolute", top: 0, bottom: "var(--rl-page-bottom)", left: 0, width: "82%", maxWidth: 326, background: "rgba(13,15,28,0.98)", borderRight: "1px solid rgba(255,255,255,0.1)", zIndex: 40, boxShadow: "20px 0 48px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "var(--rl-page-top) 14px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.1em" }}>SAVED AI CHATS</p>
-              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 17, color: "#e8eaf0" }}>RoboLab Coach</p>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 17, color: "#e8eaf0" }}>MatchMind Coach</p>
             </div>
             <button onClick={startNewChat} style={{ width: 34, height: 34, borderRadius: 10, background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: `0 0 14px ${accent}40` }}>
               <Plus size={17} style={{ color: "#08090f" }} />
@@ -631,6 +661,27 @@ export function CoachPage() {
 
       {/* Input bar */}
       <div style={{ padding: "6px 12px 10px", background: "rgba(10,11,20,0.9)", flexShrink: 0 }}>
+        {listening ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 9, background: "#181c2e", border: `1px solid ${accent}35`, borderRadius: 20, padding: "8px 8px 8px 10px", boxShadow: `0 0 24px ${accent}12` }}>
+            <button aria-label="Stop recording" onClick={() => stopVoice(false)} style={{ width: 40, height: 40, borderRadius: 14, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+              <Square size={14} style={{ color: "#ff3b5c", fill: "#ff3b5c" }} />
+            </button>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 3, height: 36, overflow: "hidden" }}>
+              {Array.from({ length: 42 }).map((_, i) => (
+                <span key={i} style={{ width: 3, height: 8 + ((i * 7) % 22), borderRadius: 3, background: i > 28 ? accent : "rgba(255,255,255,0.55)", opacity: 0.85, transformOrigin: "center", animation: `voiceWave 0.9s ${(i % 9) * 0.05}s ease-in-out infinite`, flexShrink: 0 }} />
+              ))}
+            </div>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, fontSize: 13, color: accent, minWidth: 36, textAlign: "right" }}>{voiceTime}</span>
+            <button
+              aria-label="Send voice transcript"
+              onClick={() => stopVoice(true)}
+              disabled={!input.trim() || isTyping}
+              style={{ width: 42, height: 42, borderRadius: 15, background: input.trim() && !isTyping ? accent : "rgba(255,255,255,0.08)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: input.trim() && !isTyping ? "pointer" : "default", flexShrink: 0, boxShadow: input.trim() && !isTyping ? `0 0 14px ${accent}55` : "none" }}
+            >
+              <ArrowUp size={18} style={{ color: input.trim() && !isTyping ? "#08090f" : "rgba(255,255,255,0.25)" }} />
+            </button>
+          </div>
+        ) : (
         <div style={{ display: "flex", gap: 6, background: "#181c2e", border: `1px solid ${accent}25`, borderRadius: 16, padding: "6px 6px 6px 8px", alignItems: "flex-end", boxShadow: `0 0 20px ${accent}08` }}>
           <label style={{ width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
             <ImagePlus size={17} style={{ color: "rgba(255,255,255,0.5)" }} />
@@ -641,15 +692,8 @@ export function CoachPage() {
             <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { onFiles(e.target.files); e.currentTarget.value = ""; }} />
           </label>
           <button aria-label={listening ? "Stop voice input" : "Start voice input"} onClick={toggleVoice} style={{ width: 34, height: 34, borderRadius: 10, background: listening ? `${accent}20` : "transparent", border: listening ? `1px solid ${accent}35` : "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
-            {listening ? <MicOff size={17} style={{ color: accent }} /> : <Mic size={17} style={{ color: "rgba(255,255,255,0.5)" }} />}
+            <Mic size={17} style={{ color: "rgba(255,255,255,0.5)" }} />
           </button>
-          {listening ? (
-            <div style={{ width: 34, height: 34, borderRadius: 10, background: `${accent}10`, border: `1px solid ${accent}25`, display: "flex", alignItems: "center", justifyContent: "center", gap: 3, flexShrink: 0 }}>
-              {[0, 1, 2, 3, 4].map((i) => (
-                <span key={i} style={{ width: 3, height: 12 + i * 2, borderRadius: 3, background: accent, opacity: 0.7, transformOrigin: "center", animation: `voiceWave 0.85s ${i * 0.08}s ease-in-out infinite` }} />
-              ))}
-            </div>
-          ) : null}
           <textarea
             ref={taRef}
             value={input}
@@ -668,6 +712,7 @@ export function CoachPage() {
             <Send size={15} style={{ color: (input.trim() || attachments.length) && !isTyping ? "#08090f" : "rgba(255,255,255,0.2)" }} />
           </button>
         </div>
+        )}
       </div>
 
       <style>{`@keyframes typingBounce {0%,60%,100%{transform:translateY(0);opacity:0.5;}30%{transform:translateY(-6px);opacity:1;}} @keyframes voiceWave {0%,100%{transform:scaleY(0.45);opacity:0.45;}50%{transform:scaleY(1.35);opacity:1;}}`}</style>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 import { useApp, type RoboTeam } from "./AppContext";
 import { useAccent } from "./AccentContext";
 import { TeamSearch } from "./TeamSearch";
@@ -66,10 +66,10 @@ export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: bool
       <div style={{ width: "100%", maxWidth: 400, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "26px 22px", boxShadow: "0 24px 70px rgba(0,0,0,0.55)", animation: "popIn 0.34s cubic-bezier(0.22,1,0.36,1)" }}>
         {step === "auth" ? (
           <>
-            <div style={{ width: 56, height: 56, borderRadius: 18, background: `linear-gradient(135deg, ${accent}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 28px ${accent}50`, marginBottom: 16 }}>
-              <Sparkles size={26} style={{ color: "#fff" }} />
+            <div style={{ width: 56, height: 56, borderRadius: 18, background: `linear-gradient(135deg, ${accent}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 28px ${accent}50`, marginBottom: 16, overflow: "hidden" }}>
+              <img src="/matchmind-logo.svg" alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </div>
-            <h2 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 26, color: "#fff", margin: 0, lineHeight: 1.1 }}>Welcome to RoboLab</h2>
+            <h2 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 26, color: "#fff", margin: 0, lineHeight: 1.1 }}>Welcome to MatchMind</h2>
             <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: "#9aa0bf", margin: "8px 0 20px", lineHeight: 1.5 }}>Sign in to unlock your team dashboard, AI coach, scouting, and messages.</p>
 
             <div ref={gbtn} style={{ display: "flex", justifyContent: "center", marginBottom: 10, minHeight: GOOGLE_CLIENT_ID ? 44 : 0 }} />
@@ -91,7 +91,7 @@ export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: bool
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: accent }}>VERIFIED VIA ROBOTEVENTS</span>
             </div>
             <h2 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 24, color: "#fff", margin: "0 0 4px" }}>Find your team</h2>
-            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#9aa0bf", margin: "0 0 16px" }}>Everything in RoboLab revolves around your team. Pick yours from RobotEvents.</p>
+            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#9aa0bf", margin: "0 0 16px" }}>Everything in MatchMind revolves around your team. Pick yours from RobotEvents.</p>
 
             <TeamSearch onSelect={setPicked} selectedId={picked?.id} />
 

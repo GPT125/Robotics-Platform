@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 
-const ACCENT_KEY = "robolab:accent";
+const ACCENT_KEY = "matchmind:accent";
+const LEGACY_ACCENT_KEY = "robolab:accent";
 
 export const ACCENT_COLORS = [
   { name: "Cyan", value: "#00c8ff", dark: "#08090f" },
@@ -23,7 +24,7 @@ const AccentContext = createContext<AccentCtx>({ accent: "#00c8ff", setAccent: (
 export function AccentProvider({ children }: { children: ReactNode }) {
   const [accent, setAccentState] = useState(() => {
     if (typeof window === "undefined") return "#00c8ff";
-    return window.localStorage.getItem(ACCENT_KEY) || "#00c8ff";
+    return window.localStorage.getItem(ACCENT_KEY) || window.localStorage.getItem(LEGACY_ACCENT_KEY) || "#00c8ff";
   });
   const setAccent = (v: string) => {
     setAccentState(v);

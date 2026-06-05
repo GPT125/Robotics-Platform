@@ -74,6 +74,47 @@ export function AlliancePage({ onBack }: { onBack: () => void }) {
   const endRef = useRef<HTMLDivElement>(null);
   const selectedEvent = useMemo(() => events.find((e) => e.id === eventId), [events, eventId]);
 
+  async function buildHistories(sourceRankings: RoboRanking[], sourceTeams: RoboTeamResult[]) {
+    const candidates = sourceRankings
+      .slice(0, 14)
+      .map((r) => sourceTeams.find((t) => t.number === rTeam(r)) ?? r.team)
+      .filter((t): t is RoboTeamResult => Boolean(t?.id && t.number && t.number !== team?.number));
+    const entries = await Promise.all(candidates.map(async (candidate) => {
+      try {
+        const evs = await teamEvents(candidate.id);
+        const seasons: number[] = [];
+        for (const event of evs) {
+          const seasonId = event.season?.id;
+          if (seasonId && !seasons.includes(seasonId)) seasons.push(seasonId);
+          if (seasons.length >= 3) break;
+        }
+        const matches = (await Promise.all(seasons.map((seasonId) => teamMatches(candidate.id, seasonId)))).flat();
+        return [candidate.number, historySummary(matches, candidate.number)] as const;
+      } catch {
+        return [candidate.number, "recent RobotEvents history unavailable"] as const;
+      }
+    }));
+    return Object.fromEntries(entries);
+  }
+
+  async function refreshEventData() {
+    if (!eventId) return { r: rankings, s: skills, teams: eventTeamList, matches: eventMatchList, h: histories };
+    setLoadingData(true);
+    const divisions = selectedEvent?.divisions;
+    try {
+      const [r, s, teams, matches] = await Promise.all([eventRankings(eventId, divisions), eventSkills(eventId), eventTeams(eventId), eventMatches(eventId, divisions)]);
+      const h = await buildHistories(r, teams);
+      setRankings(r);
+      setSkills(s);
+      setEventTeamList(teams);
+      setEventMatchList(matches);
+      setHistories(h);
+      return { r, s, teams, matches, h };
+    } finally {
+      setLoadingData(false);
+    }
+  }
+
   useEffect(() => { if (team) teamEvents(team.id).then((e) => { setEvents(e); setEventId((id) => id ?? e[0]?.id ?? null); }); }, [team]);
   useEffect(() => { if (team) teamMatches(team.id).then(setOurMatches); }, [team]);
   useEffect(() => {
@@ -87,27 +128,9 @@ export function AlliancePage({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     let alive = true;
     if (!rankings.length || !eventTeamList.length) { setHistories({}); return; }
-    const candidates = rankings
-      .slice(0, 10)
-      .map((r) => eventTeamList.find((t) => t.number === rTeam(r)) ?? r.team)
-      .filter((t): t is RoboTeamResult => Boolean(t?.id && t.number && t.number !== team?.number));
     (async () => {
-      const entries = await Promise.all(candidates.map(async (candidate) => {
-        try {
-          const evs = await teamEvents(candidate.id);
-          const seasons: number[] = [];
-          for (const event of evs) {
-            const seasonId = event.season?.id;
-            if (seasonId && !seasons.includes(seasonId)) seasons.push(seasonId);
-            if (seasons.length >= 3) break;
-          }
-          const matches = (await Promise.all(seasons.map((seasonId) => teamMatches(candidate.id, seasonId)))).flat();
-          return [candidate.number, historySummary(matches, candidate.number)] as const;
-        } catch {
-          return [candidate.number, "recent RobotEvents history unavailable"] as const;
-        }
-      }));
-      if (alive) setHistories(Object.fromEntries(entries));
+      const next = await buildHistories(rankings, eventTeamList);
+      if (alive) setHistories(next);
     })();
     return () => { alive = false; };
   }, [eventTeamList, rankings, team?.number]);
@@ -134,22 +157,24 @@ export function AlliancePage({ onBack }: { onBack: () => void }) {
       .slice(0, 5);
   }, [eventTeamList, ourRank?.rank, rankings, skillMap, team?.number]);
 
-  function candidateSummary() {
-    const sk = new Map(skills.map((s) => [s.team?.number ?? s.team_number ?? "", s]));
-    return rankings.slice(0, 40).map((r) => {
+  function candidateSummary(sourceRankings = rankings, sourceSkills = skills, sourceHistories = histories) {
+    const sk = new Map(sourceSkills.map((s) => [s.team?.number ?? s.team_number ?? "", s]));
+    return sourceRankings.slice(0, 40).map((r) => {
       const num = rTeam(r);
       const s = sk.get(num);
       const accept = acceptanceOdds(ourRank?.rank ?? null, r.rank ?? null);
-      return `${num} (rank ${r.rank}, ${r.wins ?? "?"}-${r.losses ?? "?"}, ${r.wp ?? "?"}WP${s ? `, skills ${s.score ?? "?"}` : ""}, acceptance ${accept}%, 3-year history: ${histories[num] ?? "loading/not available"})`;
+      return `${num} (rank ${r.rank}, ${r.wins ?? "?"}-${r.losses ?? "?"}, ${r.wp ?? "?"}WP${s ? `, skills ${s.score ?? "?"}` : ""}, acceptance ${accept}%, 3-year history: ${sourceHistories[num] ?? "loading/not available"})`;
     }).join("; ");
   }
 
   async function generate() {
     if (!team || !selectedEvent || generating) return;
     setGenerating(true);
+    setMessages([{ role: "ai", text: "Searching current RobotEvents rankings, skills, match schedule, and recent team history before building the plan…" }]);
+    const fresh = await refreshEventData().catch(() => ({ r: rankings, s: skills, teams: eventTeamList, matches: eventMatchList, h: histories }));
     const prompt = `I am team ${team.number} (${team.team_name}). We are at "${selectedEvent.name}".${ourRank ? ` Our current rank is ${ourRank.rank} with ${ourRank.wins ?? "?"}-${ourRank.losses ?? "?"} record.` : ""}
-Here are the teams at this event with official RobotEvents stats, acceptance odds, and recent 3-year summaries where available: ${candidateSummary() || "rankings not posted yet"}.
-Our current event matches loaded: ${eventMatchList.length}. Our historical match summary: ${team ? historySummary(ourMatches, team.number) : "unknown"}.
+Here are the teams at this event with official RobotEvents stats, acceptance odds, and recent 3-year summaries where available: ${candidateSummary(fresh.r, fresh.s, fresh.h) || "rankings not posted yet"}.
+Our current event matches loaded: ${fresh.matches.length}. Our historical match summary: ${team ? historySummary(ourMatches, team.number) : "unknown"}.
 
 Act as an expert VEX alliance-selection strategist. Recommend the best alliance partners for us going into elimination selection. Requirements:
 - Rank your TOP 5 picks from best to last-resort.
@@ -158,7 +183,7 @@ Act as an expert VEX alliance-selection strategist. Recommend the best alliance 
 - End with one short "Strategy" line on who to target first.
 Format with a clear numbered list and bold team numbers. Do not show confidence.`;
     try {
-      const r = await askCoach({ messages: [{ role: "user", content: prompt }], context: `Alliance selection at ${selectedEvent.name} for ${team.number}.` });
+      const r = await askCoach({ messages: [{ role: "user", content: prompt }], context: `Alliance selection at ${selectedEvent.name} for ${team.number}. Official data: ${fresh.r.length} rankings, ${fresh.s.length} skills rows, ${fresh.matches.length} matches, ${fresh.teams.length} teams.` });
       setMessages([{ role: "ai", text: r.answer }]);
     } catch {
       setMessages([{ role: "ai", text: "I couldn't reach the AI right now. Check your connection and try again." }]);
@@ -182,7 +207,7 @@ Format with a clear numbered list and bold team numbers. Do not show confidence.
 
   return (
     <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", paddingBottom: 0 }}>
-      <div style={{ padding: "16px 16px 12px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, background: "rgba(8,9,15,0.92)", backdropFilter: "blur(12px)", zIndex: 5, flexShrink: 0 }}>
+      <div style={{ padding: "var(--rl-page-top) 16px 12px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, background: "rgba(8,9,15,0.92)", backdropFilter: "blur(12px)", zIndex: 5, flexShrink: 0 }}>
         <button onClick={onBack} style={{ width: 36, height: 36, borderRadius: 11, background: "#181c2e", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><ArrowLeft size={18} style={{ color: "#e8eaf0" }} /></button>
         <div style={{ flex: 1 }}>
           <h1 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 20, color: "#fff", margin: 0 }}>Alliance Selector</h1>
@@ -218,7 +243,7 @@ Format with a clear numbered list and bold team numbers. Do not show confidence.
 
             {shortlist.length ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}>ROBO LAB SHORTLIST</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}>MATCHMIND SHORTLIST</p>
                 {shortlist.map((row, idx) => (
                   <div key={row.number} style={{ background: "#111320", border: `1px solid ${idx === 0 ? accent + "40" : "rgba(255,255,255,0.07)"}`, borderRadius: 14, padding: "12px 14px" }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -226,11 +251,11 @@ Format with a clear numbered list and bold team numbers. Do not show confidence.
                       <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#b0b4c8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.team?.team_name && row.team.team_name !== row.number ? row.team.team_name : ""}</span>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: accent }}>Fit {row.score}</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: accent }}>Partner match {row.score}</span>
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#10b981" }}>Accept {row.accept}%</span>
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#f59e0b" }}>Skills {row.skill?.score ?? "—"}</span>
                     </div>
-                    <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf", lineHeight: 1.45, marginTop: 6 }}>Rank #{row.ranking.rank ?? "—"} with {row.ranking.wins ?? 0}-{row.ranking.losses ?? 0} record. {histories[row.number] ? `3-year: ${histories[row.number]}.` : "History loading from RobotEvents."}</p>
+                    <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf", lineHeight: 1.45, marginTop: 6 }}>Partner match blends rank, skills, record, and acceptance odds. Rank #{row.ranking.rank ?? "—"} with {row.ranking.wins ?? 0}-{row.ranking.losses ?? 0} record. {histories[row.number] ? `3-year: ${histories[row.number]}.` : "History loading from RobotEvents."}</p>
                   </div>
                 ))}
               </div>

@@ -1,18 +1,18 @@
-# RoboLab Master Project Specification
+# MatchMind Master Project Specification
 
 Last updated: 2026-06-02
 
-This document is the combined product, engineering, and implementation handoff for RoboLab after merging the current RoboLab platform with the standalone `Scout-Master-Pro` project. It is based on:
+This document is the combined product, engineering, and implementation handoff for MatchMind after merging the current MatchMind platform with the standalone `Scout-Master-Pro` project. It is based on:
 
 - `/Users/shervinshapoury/Downloads/RoboLab_Improved_5_Page_Build_Spec.pdf`
 - `/Users/shervinshapoury/Documents/Robotics Platform/Scout-Master-Pro`
-- The existing RoboLab React/Vite SPA in `/Users/shervinshapoury/Documents/Robotics Platform/src`
+- The existing MatchMind React/Vite SPA in `/Users/shervinshapoury/Documents/Robotics Platform/src`
 
-RoboLab is a premium, mobile-first robotics competition command center for VEX teams. It combines official RobotEvents data, offline-first scouting, tournament intelligence, workspace messaging, robot status, AI analysis, and robot image/video part audits into one platform.
+MatchMind is a premium, mobile-first robotics competition command center for VEX teams. It combines official RobotEvents data, offline-first scouting, tournament intelligence, workspace messaging, robot status, AI analysis, and robot image/video part audits into one platform.
 
 ## Product Direction
 
-RoboLab is not only a scouting database. It is the operating system a robotics team opens during practices, pit scouting, qualification rounds, alliance selection, robot repair sessions, and strategy meetings.
+MatchMind is not only a scouting database. It is the operating system a robotics team opens during practices, pit scouting, qualification rounds, alliance selection, robot repair sessions, and strategy meetings.
 
 The merged platform should help teams answer:
 
@@ -28,9 +28,9 @@ The merged platform should help teams answer:
 
 ## Merged Platform Sources
 
-### Current RoboLab SPA
+### Current MatchMind SPA
 
-The current RoboLab app already provides:
+The current MatchMind app already provides:
 
 - Dark premium React interface
 - Home dashboard
@@ -65,9 +65,9 @@ Scout-Master-Pro contributes several strong product ideas:
 
 ## Build Outcome
 
-The merged direction is one RoboLab platform with the best of both:
+The merged direction is one MatchMind platform with the best of both:
 
-- Current RoboLab supplies the polished web/desktop SPA shell and AI/scouting workflows.
+- Current MatchMind supplies the polished web/desktop SPA shell and AI/scouting workflows.
 - Scout-Master-Pro supplies mobile-native product discipline: empty production state, first-run auth, tournaments, robot status, image upload, and workspace settings.
 - The new Robot Lab direction removes the old 360 simulator priority. The new workflow is image/video robot part audit, AI-assisted VEX part detection, official library matching, cost estimate, and manual confirmation.
 
@@ -123,7 +123,7 @@ AI should never feel like a magic black box. Every AI output needs:
 
 ### Mobile Bottom Navigation
 
-RoboLab uses five main tabs:
+MatchMind uses five main tabs:
 
 1. Home
 2. Scout
@@ -151,7 +151,7 @@ Desktop keeps a wider strategy-meeting layout:
 
 ## First-Run Auth
 
-The app should show a centered sign-in modal when a new user opens RoboLab.
+The app should show a centered sign-in modal when a new user opens MatchMind.
 
 Buttons:
 
@@ -180,12 +180,12 @@ Recommended production stack:
 
 ## Environment Variables
 
-The repo now includes `robolab.env.example`.
+The repo now includes `matchmind.env.example`.
 
 Copy it locally:
 
 ```bash
-cp robolab.env.example .env.local
+cp matchmind.env.example .env.local
 ```
 
 Important groups:
@@ -225,7 +225,7 @@ Widgets should eventually be rearrangeable:
 
 ## Scout
 
-Scout merges RoboLab search with Scout-Master-Pro note organization.
+Scout merges MatchMind search with Scout-Master-Pro note organization.
 
 Search should support:
 
@@ -522,7 +522,7 @@ New direction:
 - User must confirm labels before saving.
 - Low-confidence detections must say manual labeling recommended.
 - Cost estimate is rough, editable, and source-labeled.
-- RoboLab must never pretend the CAD or bill of materials is exact.
+- MatchMind must never pretend the CAD or bill of materials is exact.
 
 Capture prompts:
 
@@ -749,7 +749,7 @@ Required privacy features:
 
 ## UI Quality Bar
 
-RoboLab must feel like a premium robotics analytics product.
+MatchMind must feel like a premium robotics analytics product.
 
 Visual direction:
 
@@ -780,7 +780,7 @@ The current merged SPA implements:
 - VEX parts cost estimate table
 - Manual confirmation workflow UI
 - Settings team/program/theme/API diagnostics
-- `robolab.env.example`
+- `matchmind.env.example`
 - Comprehensive TypeScript model updates
 - `/api` stubs for tournaments and robot-lab routes
 
@@ -801,7 +801,7 @@ If the hang persists, pin to a known-good Vite/React/esbuild stack and rebuild t
 
 ## Launch Acceptance Checklist
 
-RoboLab is launch-ready when:
+MatchMind is launch-ready when:
 
 - Google modal works and skip mode is clear.
 - RobotEvents key works server-side or UI explains failure.
@@ -816,4 +816,3 @@ RoboLab is launch-ready when:
 - Every major screen has loading, empty, error, stale, and offline states.
 - Mobile UI feels native and fast.
 - Desktop UI supports strategy meetings.
-

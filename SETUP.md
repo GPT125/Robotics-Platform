@@ -1,4 +1,4 @@
-# RoboLab — Setup & What I Need From You
+# MatchMind — Setup & What I Need From You
 
 This is a Vite + React (TypeScript) mobile-first web app. The frontend lives in `src/`,
 and the API/backend runs as middleware inside `vite.config.ts` (works in both `npm run dev`
@@ -39,7 +39,7 @@ you must add your app's origins to the OAuth client in Google Cloud Console →
 
 ### 2. Teammate invite emails (Resend)
 Invites POST to `/api/invites/send` which calls Resend server-side. To deliver real mail:
-- Verify a sending domain in Resend, then set `INVITE_FROM_EMAIL="RoboLab <invites@yourdomain.com>"`.
+- Verify a sending domain in Resend, then set `INVITE_FROM_EMAIL="MatchMind <invites@yourdomain.com>"`.
 - Until a domain is verified, Resend only sends from `onboarding@resend.dev` to your own address.
 
 ### 3. Firebase backend (to store users + power cross-device messaging)
@@ -53,9 +53,25 @@ provided as `FIREBASE_SERVICE_ACCOUNT` (the JSON, base64 or raw). With that I ca
 The web API key alone cannot do secure server-side writes.
 
 ### 4. Messaging
-Messaging currently works per-device (local). Real cross-user messaging needs the Firestore
-service account above (or a Supabase project: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
-`SUPABASE_SERVICE_ROLE_KEY`). Tell me which backend you want (Firebase is already keyed).
+Messaging currently works per-device (local) with clean chat bubbles, media upload, search,
+robotics reactions, direct replies, unread counts, and offline waiting states.
+
+To make messages actually work across teammates by email, configure one realtime/private backend:
+
+**Recommended: Firebase**
+1. Create/confirm a Firebase project.
+2. Enable Google sign-in in Firebase Authentication.
+3. Create Firestore.
+4. Generate a Firebase service account JSON.
+5. Set `FIREBASE_SERVICE_ACCOUNT` on the server/Render environment.
+6. Add Firestore security rules so users can only read/write conversations inside their workspace.
+
+**Alternative: Supabase**
+Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`, then add
+tables for users, workspace members, conversations, messages, reactions, and read receipts.
+
+The web API key alone is not enough for secure private team messaging because server-side writes,
+workspace authorization, and realtime message fan-out need a trusted backend credential.
 
 ## Deploy
 - **Render:** `render.yaml` is included. Build `npm install && npm run build`, start `npm start`.

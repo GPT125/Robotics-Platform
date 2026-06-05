@@ -1,4 +1,4 @@
-# RoboLab — Remaining Work
+# MatchMind — Remaining Work
 
 This file now tracks only what is NOT yet complete. Completed items have been removed.
 See `SETUP.md` for keys/services I need from you.

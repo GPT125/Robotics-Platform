@@ -2,6 +2,11 @@
 
 :root {
   --font-size: 16px;
+  --rl-safe-top: env(safe-area-inset-top, 0px);
+  --rl-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --rl-page-top: max(32px, calc(var(--rl-safe-top) + 8px));
+  --rl-page-bottom: max(108px, calc(92px + var(--rl-safe-bottom)));
+  --rl-nav-bottom: max(18px, calc(var(--rl-safe-bottom) + 12px));
   --background: #08090f;
   --foreground: #e8eaf0;
   --card: #111320;
@@ -126,6 +131,9 @@
 
   body {
     @apply bg-background text-foreground;
+    overflow-x: hidden;
+    overscroll-behavior-y: none;
+    -webkit-font-smoothing: antialiased;
   }
 
   /**

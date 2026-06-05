@@ -4,6 +4,8 @@ import { useAccent } from "../AccentContext";
 import { useApp, type ChatAttachment, type Conversation } from "../AppContext";
 import { downscaleImage, readFileAsDataUrl } from "../media";
 
+const REACTIONS = ["👍", "✅", "⚠️", "🤖", "🏆"];
+
 function getInitials(name: string) {
   return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2) || "RL";
 }
@@ -28,7 +30,7 @@ function AttachmentPreview({ att }: { att: ChatAttachment }) {
 
 export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
   const { accent } = useAccent();
-  const { signedIn, profile, team, conversations, addConversation, sendConversationMessage, markConversationRead, setOnboarded } = useApp();
+  const { signedIn, profile, team, conversations, addConversation, sendConversationMessage, toggleMessageReaction, markConversationRead, setOnboarded } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
@@ -37,6 +39,7 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
   const [newName, setNewName] = useState("");
   const [newTeam, setNewTeam] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [replyTo, setReplyTo] = useState<{ id: string; name: string; text: string } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
 
@@ -57,9 +60,11 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
 
   const handleSend = () => {
     if ((!input.trim() && !attachments.length) || !selected) return;
-    sendConversationMessage(selected.id, { text: input.trim(), attachments });
+    const text = replyTo ? `Replying to ${replyTo.name}: ${replyTo.text.slice(0, 72)}\n${input.trim()}` : input.trim();
+    sendConversationMessage(selected.id, { text, attachments });
     setInput("");
     setAttachments([]);
+    setReplyTo(null);
   };
 
   const handleNewConvo = () => {
@@ -74,13 +79,13 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
 
   if (!signedIn || !profile?.email) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", padding: "0 24px", justifyContent: "center", alignItems: "center", gap: 0, paddingBottom: 80 }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", padding: "var(--rl-page-top) 24px var(--rl-page-bottom)", justifyContent: "center", alignItems: "center", gap: 0, boxSizing: "border-box" }}>
         <div style={{ width: 72, height: 72, borderRadius: 20, background: `linear-gradient(135deg, ${accent}30, #7c3aed30)`, border: `1px solid ${accent}40`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
           <MessageCircle size={32} style={{ color: accent }} />
         </div>
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 22, color: "#e8eaf0", textAlign: "center", marginBottom: 8 }}>Messages</p>
         <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: "#7a80a0", textAlign: "center", lineHeight: 1.6, marginBottom: 36, maxWidth: 280 }}>
-          Sign in with Google to message teammates by email inside your RoboLab workspace.
+          Sign in with Google to message teammates by email inside your MatchMind workspace.
         </p>
         <button onClick={() => { setOnboarded(false); onSignIn?.(); }} style={{ width: "100%", maxWidth: 340, padding: "14px", borderRadius: 14, background: accent, border: "none", fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, color: "#08090f", cursor: "pointer", boxShadow: `0 0 20px ${accent}40`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
           Sign in with Google
@@ -96,8 +101,8 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
   if (selected) {
     const avatarBg = hashColor(selected.email);
     return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: 72 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(10,11,20,0.95)", backdropFilter: "blur(12px)" }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: "var(--rl-page-bottom)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "var(--rl-page-top) 14px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(10,11,20,0.95)", backdropFilter: "blur(12px)" }}>
           <button onClick={() => setSelectedId(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
             <ArrowLeft size={16} style={{ color: "#e8eaf0" }} />
           </button>
@@ -135,9 +140,20 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
                   ) : null}
                   {msg.text ? (
                     <div style={{ maxWidth: "76%", padding: "10px 14px", borderRadius: msg.role === "me" ? "18px 18px 4px 18px" : "18px 18px 18px 4px", background: msg.role === "me" ? accent : "#181c2e", border: msg.role !== "me" ? "1px solid rgba(255,255,255,0.07)" : "none", fontFamily: "'Inter', sans-serif", fontSize: 13, color: msg.role === "me" ? "#08090f" : "#e8eaf0", fontWeight: msg.role === "me" ? 500 : 400, lineHeight: 1.55, overflowWrap: "anywhere" }}>
-                      {msg.text}
+                      {msg.text.split("\n").map((line, index) => (
+                        <span key={`${msg.id}-${index}`} style={{ display: "block", opacity: line.startsWith("Replying to ") ? 0.72 : 1, fontSize: line.startsWith("Replying to ") ? 11 : undefined }}>{line}</span>
+                      ))}
                     </div>
                   ) : null}
+                  <div style={{ maxWidth: "78%", display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", justifyContent: msg.role === "me" ? "flex-end" : "flex-start", marginTop: 5 }}>
+                    {REACTIONS.map((reaction) => {
+                      const active = (msg.reactions ?? []).includes(reaction);
+                      return (
+                        <button key={reaction} onClick={() => toggleMessageReaction(selected.id, msg.id, reaction)} style={{ minWidth: 27, height: 24, borderRadius: 999, background: active ? `${accent}22` : "rgba(255,255,255,0.04)", border: `1px solid ${active ? accent + "45" : "rgba(255,255,255,0.07)"}`, fontSize: 12, cursor: "pointer" }}>{reaction}</button>
+                      );
+                    })}
+                    <button onClick={() => setReplyTo({ id: msg.id, name: msg.senderName, text: msg.text || "media" })} style={{ height: 24, borderRadius: 999, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 10.5, padding: "0 8px", cursor: "pointer" }}>Reply</button>
+                  </div>
                 </>
               )}
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: msg.status === "waiting" ? "#ff8c00" : "rgba(255,255,255,0.2)", marginTop: 3 }}>
@@ -160,6 +176,16 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
         ) : null}
 
         <div style={{ padding: "8px 14px 10px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          {replyTo ? (
+            <div style={{ marginBottom: 7, background: "#111320", border: `1px solid ${accent}25`, borderRadius: 12, padding: "8px 10px", display: "flex", alignItems: "center", gap: 9 }}>
+              <div style={{ width: 3, alignSelf: "stretch", borderRadius: 3, background: accent }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, color: accent }}>Replying to {replyTo.name}</p>
+                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9aa0bf", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{replyTo.text}</p>
+              </div>
+              <button onClick={() => setReplyTo(null)} style={{ width: 26, height: 26, borderRadius: 9, background: "rgba(255,255,255,0.06)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={12} style={{ color: "#9aa0bf" }} /></button>
+            </div>
+          ) : null}
           <div style={{ display: "flex", gap: 8, background: "#181c2e", border: `1px solid ${accent}25`, borderRadius: 16, padding: "8px 8px 8px 10px", alignItems: "center" }}>
             <label style={{ width: 32, height: 32, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
               <ImagePlus size={16} style={{ color: "rgba(255,255,255,0.5)" }} />
@@ -178,8 +204,8 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
   const filtered = conversations.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()) || c.email.toLowerCase().includes(query.toLowerCase()) || (c.teamId?.toLowerCase().includes(query.toLowerCase()) ?? false));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: 80 }}>
-      <div style={{ padding: "20px 16px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: "var(--rl-page-bottom)" }}>
+      <div style={{ padding: "var(--rl-page-top) 16px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div>
             <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "#7a80a0", letterSpacing: "0.1em" }}>TEAM COMMS</p>

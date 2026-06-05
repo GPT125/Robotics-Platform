@@ -221,8 +221,8 @@ export function ScoutPage() {
     ];
 
     return (
-      <div style={{ overflowY: "auto", height: "100dvh", paddingBottom: 90, scrollbarWidth: "none" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 16px 10px" }}>
+      <div style={{ overflowY: "auto", height: "100dvh", paddingBottom: "var(--rl-page-bottom)", scrollbarWidth: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "var(--rl-page-top) 16px 10px" }}>
           <button onClick={() => setSelected(null)} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
             <ArrowLeft size={16} style={{ color: "#e8eaf0" }} />
           </button>
@@ -305,9 +305,9 @@ export function ScoutPage() {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: 80 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: "var(--rl-page-bottom)" }}>
       {/* Header */}
-      <div style={{ padding: "20px 16px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <div style={{ padding: "var(--rl-page-top) 16px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div>
             <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "#7a80a0", letterSpacing: "0.1em" }}>TEAM ANALYSIS</p>

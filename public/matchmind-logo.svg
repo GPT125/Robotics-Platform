@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MatchMind logo">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="70%">
+      <stop offset="0%" stop-color="#101827"/>
+      <stop offset="100%" stop-color="#05060d"/>
+    </radialGradient>
+    <linearGradient id="red" x1="116" y1="84" x2="262" y2="362" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff3b3b"/>
+      <stop offset="1" stop-color="#d90416"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="256" y1="80" x2="410" y2="364" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f7f7f7"/>
+      <stop offset="0.52" stop-color="#bfc3ca"/>
+      <stop offset="1" stop-color="#6b7280"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 1  0 0.2 0 0 0.08  0 0 0.2 0 0.08  0 0 0 0.5 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="488" height="488" rx="96" fill="url(#bg)" stroke="#273044" stroke-width="3"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M245 95c-54 0-87 38-83 89-43 0-77 34-77 77 0 35 23 66 56 74 8 55 49 83 104 83 26 0 47-21 47-47V142c0-26-21-47-47-47Z" stroke="url(#red)" stroke-width="17" filter="url(#glow)"/>
+    <path d="M130 230c-35 0-62 27-62 62s27 62 62 62c13 0 25-4 35-11" stroke="url(#red)" stroke-width="17"/>
+    <path d="M164 184c0 30 25 55 55 55" stroke="url(#red)" stroke-width="17"/>
+    <path d="M194 356c14 16 33 24 56 24" stroke="url(#red)" stroke-width="17"/>
+    <path d="M179 300h45l40 40v54" stroke="url(#red)" stroke-width="12"/>
+    <path d="M192 180h34l38 44v82" stroke="url(#red)" stroke-width="12"/>
+    <circle cx="178" cy="300" r="13" stroke="url(#red)" stroke-width="12"/>
+    <circle cx="192" cy="180" r="13" stroke="url(#red)" stroke-width="12"/>
+    <circle cx="264" cy="306" r="13" stroke="url(#red)" stroke-width="12"/>
+  </g>
+  <g fill="none" stroke="url(#steel)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M310 100v56l45 24 42-34 40 40-34 42 21 50 54 8v57l-54 8-21 50 34 42-40 40-42-34-45 24v56" stroke-width="23"/>
+    <path d="M318 390V281l45-52v-78" stroke-width="12"/>
+    <path d="M358 390v-66l59-61 28-3" stroke-width="12"/>
+    <path d="M398 390v-42l31-32" stroke-width="12"/>
+    <circle cx="363" cy="151" r="14" stroke-width="12"/>
+    <circle cx="445" cy="260" r="14" stroke-width="12"/>
+    <circle cx="429" cy="316" r="14" stroke-width="12"/>
+  </g>
+  <text x="256" y="454" text-anchor="middle" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700" letter-spacing="11">MATCH</text>
+  <text x="256" y="486" text-anchor="middle" fill="#ef233c" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="15">MIND</text>
+</svg>

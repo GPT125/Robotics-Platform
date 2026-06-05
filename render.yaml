@@ -1,9 +1,9 @@
-# RoboLab — Render deploy blueprint
+# MatchMind — Render deploy blueprint
 # The Vite preview server also runs the /api/* middleware (AI coach, RobotEvents
 # proxy, integration status), so a single web service serves the app + API.
 services:
   - type: web
-    name: robolab
+    name: matchmind
     runtime: node
     plan: free
     buildCommand: npm install && npm run build

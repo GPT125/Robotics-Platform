@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical } from "lucide-react";
+import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical, Sparkles } from "lucide-react";
 import { useAccent } from "../AccentContext";
 import { useApp, type RoboTeam, type ScoutNote } from "../AppContext";
 import {
@@ -9,14 +9,15 @@ import {
   eventMatches,
   eventRankings,
   eventSkills,
+  eventSuggestionReason,
   eventTeams,
   filterEventsForQuery,
   matchAlliances,
   matchLabel,
   searchEvents,
   searchTeams,
+  teamSuggestionReason,
   askCoach,
-  sendPredictionFeedback,
   teamAwards,
   teamEvents,
   teamMatches,
@@ -70,6 +71,32 @@ function shortDate(value?: string) {
   return Number.isNaN(d.getTime()) ? "TBD" : d.toLocaleDateString([], { month: "short", day: "numeric", year: "2-digit" });
 }
 
+function dateKey(value?: string | null) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function eventDayKeys(event: RoboEvent) {
+  const start = new Date(event.start);
+  const end = new Date(event.end || event.start);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 12);
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 12);
+  const days: string[] = [];
+  while (cursor.getTime() <= last.getTime() && days.length < 10) {
+    days.push(dateKey(cursor.toISOString()));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+function dayLabel(key: string) {
+  const d = new Date(`${key}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? key : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+}
+
 function schoolYear(value?: string | null) {
   if (!value) return "";
   const d = new Date(value);
@@ -81,6 +108,11 @@ function schoolYear(value?: string | null) {
 
 function mostRecentSchoolYear(events: RoboEvent[]) {
   return events.map((e) => schoolYear(e.start)).filter(Boolean).sort().reverse()[0] ?? "";
+}
+
+function teamLine(team: RoboTeamResult, reverse = false) {
+  const name = team.team_name && team.team_name !== team.number ? team.team_name : "";
+  return reverse && name ? `${name} ${team.number}` : name ? `${team.number} ${name}` : team.number;
 }
 
 function cleanAiSummary(text: string, fallback: string) {
@@ -262,9 +294,10 @@ function awardCandidates(awardName: string, profile: EventProfile) {
   return { rule: match?.[1] ?? "Judged award. RobotEvents does not include interview or notebook rubric details.", teams: topRanked.slice(0, 4), why: "Likely list uses visible performance data only; judges decide using interview, notebook, conduct, and award rubric evidence." };
 }
 
-function TeamCard({ team, accent, onClick }: { team: RoboTeamResult; accent: string; onClick: () => void }) {
+function TeamCard({ team, accent, onClick, query, index = 0 }: { team: RoboTeamResult; accent: string; onClick: () => void; query?: string; index?: number }) {
+  const reason = query ? teamSuggestionReason(team, query) : team.program?.code ? `${team.program.code} RobotEvents result` : "RobotEvents result";
   return (
-    <button onClick={onClick} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "15px 16px", textAlign: "left", cursor: "pointer", width: "100%" }}>
+    <button className="lookupResultCard" onClick={onClick} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "15px 16px", textAlign: "left", cursor: "pointer", width: "100%", animation: "lookupResultIn 0.3s cubic-bezier(0.22,1,0.36,1) both", animationDelay: `${Math.min(index * 35, 180)}ms`, transition: "transform 0.18s ease, border-color 0.18s ease, background 0.18s ease" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
         <div style={{ width: 44, height: 44, borderRadius: 12, background: `${accent}15`, border: `1px solid ${accent}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, fontSize: 11, color: accent }}>{team.number}</span>
@@ -278,6 +311,12 @@ function TeamCard({ team, accent, onClick }: { team: RoboTeamResult; accent: str
           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
             <MapPin size={10} style={{ color: "#7a80a0" }} />
             <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#7a80a0" }}>{loc(team)}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: `${accent}12`, border: `1px solid ${accent}25`, borderRadius: 999, padding: "3px 7px", fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: accent }}>
+              <Sparkles size={9} /> {reason}
+            </span>
+            {team.program?.code ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#8a90aa" }}>{team.program.code}</span> : null}
           </div>
         </div>
         <ChevronRight size={16} style={{ color: "rgba(255,255,255,0.2)", marginTop: 10 }} />
@@ -419,13 +458,13 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
     let alive = true;
     const fallback = stats.scored.length
       ? `${seed.number} is ${stats.wins}-${stats.losses} in ${selectedYear || "this school year"} with a ${stats.winRate}% win rate, ${stats.avg ?? "unknown"} average alliance score, ${stats.max ?? "unknown"} max score, ${recentForm} recent form, and ${scoreStdDev == null ? "not enough data for score consistency" : `about +/-${scoreStdDev} score consistency`}. They appear in ${filteredEvents.length} official event${filteredEvents.length === 1 ? "" : "s"} and ${filteredAwards.length} award record${filteredAwards.length === 1 ? "" : "s"} for this view.`
-      : `${seed.number} is listed in ${filteredEvents.length} official event${filteredEvents.length === 1 ? "" : "s"} for ${selectedYear || "this school year"} with ${filteredAwards.length} award record${filteredAwards.length === 1 ? "" : "s"} visible in RobotEvents. Match scores are not posted in this view yet, so RoboLab is using tournament participation, awards, and scout notes until scored match data appears.`;
+      : `${seed.number} is listed in ${filteredEvents.length} official event${filteredEvents.length === 1 ? "" : "s"} for ${selectedYear || "this school year"} with ${filteredAwards.length} award record${filteredAwards.length === 1 ? "" : "s"} visible in RobotEvents. Match scores are not posted in this view yet, so MatchMind is using tournament participation, awards, and scout notes until scored match data appears.`;
     setAiSummary(fallback);
     if (loading || (!stats.scored.length && !filteredEvents.length && !filteredAwards.length)) return;
     askCoach({
       messages: [{
         role: "user",
-        content: `Create a polished, student-friendly RoboLab scouting summary for team ${seed.number} ${seed.team_name}. Use only this RobotEvents data and do not say "limited scored data" as the main answer. If matches are missing, analyze event activity and awards instead. Return one plain paragraph under 95 words. Do not use markdown, headings, bullets, numbered lists, quotes, or a confidence line. Stats: ${stats.wins} wins, ${stats.losses} losses, ${stats.winRate ?? "unknown"}% win rate, avg score ${stats.avg ?? "unknown"}, max score ${stats.max ?? "unknown"}, recent form ${recentForm}, score consistency ${scoreStdDev == null ? "unknown" : `+/-${scoreStdDev}`}, events ${filteredEvents.map((e) => `${e.name} (${shortDate(e.start)})`).join("; ") || "none"}, awards ${filteredAwards.map(awardTitle).join("; ") || "none"}, scout notes ${teamNotes.map((note) => `${note.matchLabel ?? "note"}: ${note.description}`).slice(0, 4).join("; ") || "none"}.`,
+        content: `Create a polished, student-friendly MatchMind scouting summary for team ${seed.number} ${seed.team_name}. Use only this RobotEvents data and do not say "limited scored data" as the main answer. If matches are missing, analyze event activity and awards instead. Return one plain paragraph under 95 words. Do not use markdown, headings, bullets, numbered lists, quotes, or a confidence line. Stats: ${stats.wins} wins, ${stats.losses} losses, ${stats.winRate ?? "unknown"}% win rate, avg score ${stats.avg ?? "unknown"}, max score ${stats.max ?? "unknown"}, recent form ${recentForm}, score consistency ${scoreStdDev == null ? "unknown" : `+/-${scoreStdDev}`}, events ${filteredEvents.map((e) => `${e.name} (${shortDate(e.start)})`).join("; ") || "none"}, awards ${filteredAwards.map(awardTitle).join("; ") || "none"}, scout notes ${teamNotes.map((note) => `${note.matchLabel ?? "note"}: ${note.description}`).slice(0, 4).join("; ") || "none"}.`,
       }],
       context: `RobotEvents team profile for ${seed.number}. Selected school year: ${selectedYear}.`,
     })
@@ -435,8 +474,8 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
   }, [filteredAwards, filteredEvents, loading, recentForm, scoreStdDev, seed.number, seed.team_name, selectedYear, stats.avg, stats.losses, stats.max, stats.scored.length, stats.winRate, stats.wins, teamNotes]);
 
   return (
-    <div style={{ overflowY: "auto", height: "100%", scrollbarWidth: "none" as const, paddingBottom: 90 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 16px 10px" }}>
+    <div style={{ overflowY: "auto", height: "100%", scrollbarWidth: "none" as const, paddingBottom: "var(--rl-page-bottom)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "var(--rl-page-top) 16px 10px" }}>
         <button onClick={onBack} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
           <ArrowLeft size={16} style={{ color: "#e8eaf0" }} />
         </button>
@@ -523,7 +562,7 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
               {note.description ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#b0b4c8", lineHeight: 1.5 }}>{note.description}</p> : null}
             </div>
           ))}
-          {!teamNotes.length ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#7a80a0" }}>No RoboLab scout notes saved for this team yet.</p> : null}
+          {!teamNotes.length ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#7a80a0" }}>No MatchMind scout notes saved for this team yet.</p> : null}
         </div>
       </div>
 
@@ -609,12 +648,19 @@ function awardQualificationText(a: RoboAward) {
 }
 
 function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent; accent: string; onBack: () => void; onTeamClick: (team: RoboTeamResult) => void }) {
-  const { addPredictionFeedback } = useApp();
   const [profile, setProfile] = useState<EventProfile>({ event, teams: [], matches: [], awards: [], rankings: [], skills: [] });
   const [evTab, setEvTab] = useState<"teams" | "matches" | "rankings" | "skills" | "awards">("matches");
   const [metricSort, setMetricSort] = useState<"rank" | "opr" | "dpr" | "ccwm">("rank");
   const [loading, setLoading] = useState(true);
+  const [selectedDayKey, setSelectedDayKey] = useState("");
   const analytics = useMemo(() => eventAnalytics(profile), [profile.matches, profile.teams]);
+  const eventDays = useMemo(() => eventDayKeys(event), [event.end, event.start]);
+  const hasDatedMatches = useMemo(() => profile.matches.some((m) => dateKey(m.scheduled ?? m.started ?? "")), [profile.matches]);
+  const showDaySlider = eventDays.length > 1 && hasDatedMatches;
+  const displayedMatches = useMemo(() => {
+    if (!showDaySlider || !selectedDayKey) return profile.matches;
+    return profile.matches.filter((m) => dateKey(m.scheduled ?? m.started ?? "") === selectedDayKey);
+  }, [profile.matches, selectedDayKey, showDaySlider]);
   const skillsByTeam = useMemo(() => new Map(profile.skills.map((skill) => [skillTeamNumber(skill), skill])), [profile.skills]);
   const rankingRows = useMemo(() => {
     const byNumber = new Map(profile.teams.map((team) => [team.number, team]));
@@ -655,15 +701,14 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
     return () => { alive = false; };
   }, [event.id]);
 
-  function sendFeedback(match: RoboMatch, actual: string) {
-    const p = prediction(match, profile.rankings);
-    addPredictionFeedback({ matchId: String(match.id), predicted: p.pick, actual });
-    sendPredictionFeedback({ matchId: String(match.id), predicted: p.pick, actual });
-  }
+  useEffect(() => {
+    if (!showDaySlider) return;
+    if (!selectedDayKey || !eventDays.includes(selectedDayKey)) setSelectedDayKey(eventDays[0] ?? "");
+  }, [eventDays, selectedDayKey, showDaySlider]);
 
   return (
-    <div style={{ overflowY: "auto", height: "100%", scrollbarWidth: "none" as const, paddingBottom: 90 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 16px 10px" }}>
+    <div style={{ overflowY: "auto", height: "100%", scrollbarWidth: "none" as const, paddingBottom: "var(--rl-page-bottom)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "var(--rl-page-top) 16px 10px" }}>
         <button onClick={onBack} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
           <ArrowLeft size={16} style={{ color: "#e8eaf0" }} />
         </button>
@@ -803,7 +848,21 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
 
       {evTab === "matches" && (
         <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-          {profile.matches.map((m) => {
+          {showDaySlider ? (
+            <div style={{ display: "flex", gap: 7, overflowX: "auto", scrollbarWidth: "none", paddingBottom: 2, marginBottom: 4 }}>
+              {eventDays.map((day) => {
+                const active = selectedDayKey === day;
+                const count = profile.matches.filter((m) => dateKey(m.scheduled ?? m.started ?? "") === day).length;
+                return (
+                  <button key={day} onClick={() => setSelectedDayKey(day)} style={{ flexShrink: 0, minWidth: 112, background: active ? `${accent}18` : "#111320", border: `1px solid ${active ? accent + "45" : "rgba(255,255,255,0.08)"}`, borderRadius: 13, padding: "8px 10px", textAlign: "left", cursor: "pointer" }}>
+                    <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12, color: active ? accent : "#e8eaf0" }}>{dayLabel(day)}</p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#7a80a0", marginTop: 2 }}>{count} match{count === 1 ? "" : "es"}</p>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {displayedMatches.map((m) => {
             const { red, blue, redTeams, blueTeams } = matchAlliances(m);
             const redScore = Number(red?.score);
             const blueScore = Number(blue?.score);
@@ -818,12 +877,12 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", padding: "12px 14px", gap: 8, alignItems: "center" }}>
                   <div style={{ background: "#ff3b5c12", border: "1px solid #ff3b5c25", borderRadius: 10, padding: "8px 10px" }}>
-                    {redTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: redWon ? "#ff6b7a" : "#7a80a0", fontWeight: 600 }}>{t.number} <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10 }}>{t.team_name}</span></p>)}
+                    {redTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: redWon ? "#ff6b7a" : "#7a80a0", fontWeight: 600 }}>{teamLine(t)}</p>)}
                     <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color: redWon ? "#ff3b5c" : "#7a80a0", marginTop: 4 }}>{scored ? redScore : "—"}</p>
                   </div>
                   <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.2)" }}>VS</span>
                   <div style={{ background: "#00c8ff12", border: "1px solid #00c8ff25", borderRadius: 10, padding: "8px 10px", textAlign: "right" }}>
-                    {blueTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: scored && !redWon ? "#60d0ff" : "#7a80a0", fontWeight: 600 }}><span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10 }}>{t.team_name}</span> {t.number}</p>)}
+                    {blueTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: scored && !redWon ? "#60d0ff" : "#7a80a0", fontWeight: 600 }}>{teamLine(t, true)}</p>)}
                     <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color: scored && !redWon ? "#00c8ff" : "#7a80a0", marginTop: 4 }}>{scored ? blueScore : "—"}</p>
                   </div>
                 </div>
@@ -838,15 +897,14 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
                     </div>
                   </div>
                 ) : (
-                  <div style={{ padding: "0 14px 12px", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                  <div style={{ padding: "0 14px 12px" }}>
                     <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, color: redWon ? "#ff6b7a" : "#60d0ff" }}>Final: {redWon ? "Red" : "Blue"} by {Math.abs(redScore - blueScore)}</span>
-                    <button onClick={() => sendFeedback(m, redWon ? "red" : "blue")} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "5px 9px", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 10.5, fontWeight: 700, cursor: "pointer" }}>Result saved</button>
                   </div>
                 )}
               </div>
             );
           })}
-          {!profile.matches.length ? <div style={{ textAlign: "center", padding: "44px 20px", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 13 }}>No matches returned by RobotEvents yet.</div> : null}
+          {!displayedMatches.length ? <div style={{ textAlign: "center", padding: "44px 20px", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 13 }}>{showDaySlider ? `No matches scheduled for ${dayLabel(selectedDayKey)}.` : "No matches returned by RobotEvents yet."}</div> : null}
         </div>
       )}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -927,8 +985,8 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: 80 }}>
-      <div style={{ padding: "20px 16px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: "var(--rl-page-bottom)" }}>
+      <div style={{ padding: "var(--rl-page-top) 16px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "#7a80a0", letterSpacing: "0.1em" }}>LIVE ROBOTEVENTS</p>
         <h2 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: "22px", color: "#e8eaf0", lineHeight: 1.2, marginBottom: 14 }}>Lookup</h2>
 
@@ -948,8 +1006,13 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, scrollbarWidth: "none" }}>
-        {query.trim().length >= 2 && (teamResults.length || eventResults.length || loading) ? <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}>{loading ? "SEARCHING ROBOTEVENTS" : "SMART SUGGESTIONS"}</p> : null}
-        {tab === "teams" && teamResults.map((team) => <TeamCard key={`${team.number}-${team.id}`} team={team} accent={accent} onClick={() => setSelectedTeam(team)} />)}
+        {query.trim().length >= 2 && (teamResults.length || eventResults.length || loading) ? (
+          <p style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}>
+            {!loading ? <Sparkles size={12} style={{ color: accent }} /> : null}
+            {loading ? "SEARCHING ROBOTEVENTS" : "BEST MATCHES FROM ROBOTEVENTS"}
+          </p>
+        ) : null}
+        {tab === "teams" && teamResults.map((team, index) => <TeamCard key={`${team.number}-${team.id}`} team={team} accent={accent} query={query} index={index} onClick={() => setSelectedTeam(team)} />)}
         {tab === "teams" && !teamResults.length ? (
           <div style={{ textAlign: "center", padding: "48px 24px" }}>
             <Users size={34} style={{ color: "#2a2f48", marginBottom: 12 }} />
@@ -958,8 +1021,8 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
           </div>
         ) : null}
 
-        {tab === "events" && eventResults.map((ev) => (
-          <button key={ev.id} onClick={() => setSelectedEvent(ev)} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "15px 16px", textAlign: "left", cursor: "pointer", width: "100%" }}>
+        {tab === "events" && eventResults.map((ev, index) => (
+          <button className="lookupResultCard" key={ev.id} onClick={() => setSelectedEvent(ev)} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "15px 16px", textAlign: "left", cursor: "pointer", width: "100%", animation: "lookupResultIn 0.3s cubic-bezier(0.22,1,0.36,1) both", animationDelay: `${Math.min(index * 35, 180)}ms`, transition: "transform 0.18s ease, border-color 0.18s ease, background 0.18s ease" }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
               <div style={{ width: 44, height: 44, borderRadius: 12, background: "#ff8c0015", border: "1px solid #ff8c0030", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <Trophy size={20} style={{ color: "#ff8c00" }} />
@@ -973,7 +1036,11 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
               </div>
               <ChevronRight size={16} style={{ color: "rgba(255,255,255,0.2)" }} />
             </div>
-            <div style={{ display: "flex", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, background: `${accent}12`, border: `1px solid ${accent}25`, borderRadius: 999, padding: "3px 7px" }}>
+                <Sparkles size={10} style={{ color: accent }} />
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: accent }}>{eventSuggestionReason(ev, query)}</span>
+              </div>
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <Zap size={11} style={{ color: accent }} />
                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#b0b4c8" }}>{ev.sku}</span>
@@ -993,7 +1060,12 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
           </div>
         ) : null}
       </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes lookupResultIn{from{opacity:0;transform:translateY(10px) scale(0.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+        .lookupResultCard:active{transform:scale(0.985)}
+        @media (hover:hover){.lookupResultCard:hover{transform:translateY(-1px);border-color:${accent}55!important;background:#15182a!important}}
+      `}</style>
     </div>
   );
 }

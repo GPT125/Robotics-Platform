@@ -69,6 +69,7 @@ export type ChatMessage = {
   createdAt: number;
   status: "waiting" | "sending" | "sent" | "failed";
   attachments: ChatAttachment[];
+  reactions?: string[];
 };
 export type Conversation = {
   id: string;
@@ -86,7 +87,7 @@ export type Conversation = {
 
 export type AppNotification = {
   id: string;
-  type: "match_win" | "match_loss" | "award" | "message" | "info";
+  type: "match_win" | "match_loss" | "award" | "message" | "todo" | "info";
   title: string;
   body: string;
   createdAt: number;
@@ -126,13 +127,16 @@ type AppCtx = AppState & {
   deleteScoutNote: (id: string) => void;
   addConversation: (c: { name: string; email: string; teamId?: string; type?: Conversation["type"] }) => Conversation;
   sendConversationMessage: (conversationId: string, m: { text: string; attachments?: ChatAttachment[] }) => void;
+  toggleMessageReaction: (conversationId: string, messageId: string, reaction: string) => void;
   markConversationRead: (conversationId: string) => void;
   addNotification: (n: Omit<AppNotification, "id" | "createdAt" | "seen">) => void;
+  markNotificationSeen: (id: string) => void;
   markNotificationsSeen: () => void;
   addPredictionFeedback: (f: Omit<PredictionFeedback, "id" | "createdAt">) => void;
 };
 
-const KEY = "robolab:app:v1";
+const KEY = "matchmind:app:v1";
+const LEGACY_KEY = "robolab:app:v1";
 const initial: AppState = {
   onboarded: false,
   signedIn: false,
@@ -177,7 +181,7 @@ function getTime() {
 function load(): AppState {
   if (typeof window === "undefined") return initial;
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(KEY) ?? window.localStorage.getItem(LEGACY_KEY);
     if (!raw) return initial;
     const parsed = JSON.parse(raw) as Partial<AppState>;
     return {
@@ -223,7 +227,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           {
             id: uid(),
             type: "info",
-            title: "Welcome to RoboLab",
+            title: "Welcome to MatchMind",
             body: "Your robotics command center is ready. Select your team to unlock live match results, awards, scouting notes, and AI strategy.",
             createdAt: Date.now(),
             seen: false,
@@ -231,7 +235,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ...s.notifications,
         ].slice(0, 20),
       })),
-    continueAsGuest: () => setState((s) => ({ ...s, isGuest: true, signedIn: false, onboarded: true, profile: s.profile ?? { name: "Guest", email: null, avatar: "🤖" } })),
+    continueAsGuest: () => setState((s) => ({
+      ...s,
+      isGuest: true,
+      signedIn: false,
+      onboarded: true,
+      profile: s.profile ?? { name: "Guest", email: null, avatar: "MM" },
+      notifications: [
+        {
+          id: uid(),
+          type: "info",
+          title: "Welcome to MatchMind",
+          body: "Your competition dashboard is ready. Pick a team to unlock live matches, stats, awards, reminders, and AI strategy.",
+          createdAt: Date.now(),
+          seen: false,
+        },
+        ...s.notifications,
+      ].slice(0, 20),
+    })),
     signOut: () => setState((s) => ({ ...initial, todos: s.todos })),
     setOnboarded: (v) => setState((s) => ({ ...s, onboarded: v })),
     setTeam: (team) => setState((s) => ({ ...s, team })),
@@ -270,12 +291,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           {
             id: uid(),
             role: "system",
-            senderName: "RoboLab",
-            text: `Conversation opened with ${c.name.trim()} inside this RoboLab workspace.`,
+            senderName: "MatchMind",
+            text: `Conversation opened with ${c.name.trim()} inside this MatchMind workspace.`,
             time: getTime(),
             createdAt: Date.now(),
             status: "sent",
             attachments: [],
+            reactions: [],
           },
         ],
         createdAt: Date.now(),
@@ -286,7 +308,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sendConversationMessage: (conversationId, m) =>
       setState((s) => {
         const text = m.text.trim();
-        const profile = s.profile ?? { name: "You", email: null, avatar: "RL" };
+        const profile = s.profile ?? { name: "You", email: null, avatar: "MM" };
         return {
           ...s,
           conversations: s.conversations.map((c) =>
@@ -305,6 +327,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                       createdAt: Date.now(),
                       status: navigator.onLine ? "sent" : "waiting",
                       attachments: m.attachments ?? [],
+                      reactions: [],
                     },
                   ],
                   lastMessage: text || (m.attachments?.length ? "Shared media" : "Message"),
@@ -314,8 +337,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ),
         };
       }),
+    toggleMessageReaction: (conversationId, messageId, reaction) =>
+      setState((s) => ({
+        ...s,
+        conversations: s.conversations.map((conversation) =>
+          conversation.id !== conversationId ? conversation : {
+            ...conversation,
+            messages: conversation.messages.map((message) => {
+              if (message.id !== messageId) return message;
+              const existing = message.reactions ?? [];
+              return { ...message, reactions: existing.includes(reaction) ? existing.filter((r) => r !== reaction) : [...existing, reaction] };
+            }),
+          },
+        ),
+      })),
     markConversationRead: (conversationId) => setState((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === conversationId ? { ...c, unread: 0 } : c)) })),
     addNotification: (n) => setState((s) => ({ ...s, notifications: [{ ...n, id: uid(), createdAt: Date.now(), seen: false }, ...s.notifications].slice(0, 20) })),
+    markNotificationSeen: (id) => setState((s) => ({ ...s, notifications: s.notifications.map((n) => (n.id === id ? { ...n, seen: true } : n)) })),
     markNotificationsSeen: () => setState((s) => ({ ...s, notifications: s.notifications.map((n) => ({ ...n, seen: true })) })),
     addPredictionFeedback: (f) => setState((s) => ({ ...s, predictionFeedback: [{ ...f, id: uid(), createdAt: Date.now() }, ...s.predictionFeedback].slice(0, 100) })),
   };

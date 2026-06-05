@@ -53,11 +53,57 @@ export type RoboTeamResult = {
 };
 
 function normalized(value?: string | null) {
-  return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return (value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function compact(value?: string | null) {
+  return normalized(value).replace(/\s+/g, "");
 }
 
 function queryTerms(query: string) {
   return normalized(query).split(/\s+/).filter((term) => term.length > 1);
+}
+
+function editDistance(a: string, b: string) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = row[j];
+      row[j] = a[i - 1] === b[j - 1]
+        ? prev
+        : Math.min(prev + 1, row[j] + 1, row[j - 1] + 1);
+      prev = tmp;
+    }
+  }
+  return row[b.length];
+}
+
+function fuzzyTokenScore(source: string, terms: string[]) {
+  const tokens = source.split(/\s+/).filter(Boolean);
+  if (!tokens.length || !terms.length) return 0;
+  let score = 0;
+  for (const term of terms) {
+    let best = 0;
+    for (const token of tokens) {
+      if (token === term) best = Math.max(best, 26);
+      else if (token.startsWith(term)) best = Math.max(best, 22);
+      else if (token.includes(term)) best = Math.max(best, 16);
+      else if (term.length >= 4 && Math.abs(token.length - term.length) <= 2 && editDistance(term, token) <= 1) best = Math.max(best, 12);
+    }
+    if (!best) return 0;
+    score += best;
+  }
+  return score;
 }
 
 function teamSearchText(team: RoboTeamResult) {
@@ -74,17 +120,54 @@ function teamSearchText(team: RoboTeamResult) {
 
 function teamSearchScore(team: RoboTeamResult, query: string) {
   const q = normalized(query);
-  const number = normalized(team.number);
+  const compactQ = compact(query);
+  const number = compact(team.number);
   const name = normalized(team.team_name);
+  const organization = normalized(team.organization);
+  const location = normalized([team.location?.city, team.location?.region, team.location?.country].filter(Boolean).join(" "));
+  const program = normalized(`${team.program?.code ?? ""} ${team.program?.name ?? ""}`);
   const text = teamSearchText(team);
   const terms = queryTerms(query);
+  let score = 0;
   if (!q) return 0;
-  if (number === q) return 120;
-  if (number.startsWith(q)) return 100;
-  if (name.startsWith(q)) return 85;
-  if (text.includes(q)) return 70;
-  if (terms.length && terms.every((term) => text.includes(term))) return 55;
-  return 0;
+  if (number === compactQ) score = Math.max(score, 1000);
+  else if (number.startsWith(compactQ)) score = Math.max(score, 860);
+  else if (compactQ.length >= 2 && number.includes(compactQ)) score = Math.max(score, 650);
+
+  if (name === q) score = Math.max(score, 760);
+  else if (name.startsWith(q)) score = Math.max(score, 690);
+  else if (name.includes(q)) score = Math.max(score, 560);
+
+  if (organization === q) score = Math.max(score, 620);
+  else if (organization.startsWith(q)) score = Math.max(score, 540);
+  else if (organization.includes(q)) score = Math.max(score, 460);
+
+  if (location.includes(q)) score = Math.max(score, 360);
+  if (terms.length && terms.every((term) => text.includes(term))) score = Math.max(score, 330 + terms.length * 24);
+
+  score += fuzzyTokenScore(name, terms) * 4;
+  score += fuzzyTokenScore(organization, terms) * 3;
+  score += fuzzyTokenScore(location, terms) * 2;
+  if (score > 0 && program.includes("v5rc")) score += 42;
+  if (score > 0 && program.includes(q)) score += 24;
+  return score;
+}
+
+export function teamSuggestionReason(team: RoboTeamResult, query: string) {
+  const q = normalized(query);
+  const compactQ = compact(query);
+  const number = compact(team.number);
+  const name = normalized(team.team_name);
+  const organization = normalized(team.organization);
+  const location = normalized([team.location?.city, team.location?.region, team.location?.country].filter(Boolean).join(" "));
+  const terms = queryTerms(query);
+  if (number === compactQ) return "Exact team number";
+  if (number.startsWith(compactQ)) return "Team number prefix";
+  if (name.includes(q)) return "Team name match";
+  if (organization.includes(q)) return "School or organization match";
+  if (location.includes(q)) return "Location match";
+  if (terms.length && terms.every((term) => teamSearchText(team).includes(term))) return "Multi-word match";
+  return team.program?.code ? `${team.program.code} RobotEvents result` : "RobotEvents result";
 }
 
 // Validate/lookup a team by its exact number via RobotEvents (forces a real team).
@@ -92,8 +175,8 @@ export async function searchTeams(number: string): Promise<RoboTeamResult[]> {
   const q = number.trim().toUpperCase();
   if (!q) return [];
   const attempts = [
-    `/teams?number%5B%5D=${encodeURIComponent(q)}&per_page=25`,
-    `/teams?search=${encodeURIComponent(q)}&per_page=25`,
+    `/teams?number%5B%5D=${encodeURIComponent(q)}&per_page=100`,
+    `/teams?search=${encodeURIComponent(q)}&per_page=100`,
   ];
   const seen = new Set<number | string>();
   const merged: RoboTeamResult[] = [];
@@ -119,7 +202,10 @@ export async function searchTeams(number: string): Promise<RoboTeamResult[]> {
       const programA = a.team.program?.code === "V5RC" ? 1 : 0;
       const programB = b.team.program?.code === "V5RC" ? 1 : 0;
       if (programA !== programB) return programB - programA;
-      return a.team.number.localeCompare(b.team.number);
+      const exactA = compact(a.team.number) === compact(q) ? 1 : 0;
+      const exactB = compact(b.team.number) === compact(q) ? 1 : 0;
+      if (exactA !== exactB) return exactB - exactA;
+      return a.team.number.localeCompare(b.team.number, undefined, { numeric: true, sensitivity: "base" });
     })
     .map(({ team }) => team)
     .slice(0, 25);
@@ -209,8 +295,11 @@ type DataList<T> = { data?: T[] };
 
 export function eventSearchScore(event: RoboEvent, query: string) {
   const q = normalized(query);
-  const sku = normalized(event.sku);
+  const compactQ = compact(query);
+  const sku = compact(event.sku);
   const name = normalized(event.name);
+  const location = normalized([event.location?.city, event.location?.region, event.location?.country].filter(Boolean).join(" "));
+  const season = normalized(event.season?.name);
   const text = normalized([
     event.sku,
     event.name,
@@ -220,13 +309,44 @@ export function eventSearchScore(event: RoboEvent, query: string) {
     event.season?.name,
   ].filter(Boolean).join(" "));
   const terms = queryTerms(query);
+  let score = 0;
   if (!q) return 0;
-  if (sku === q || name === q) return 130;
-  if (sku.startsWith(q)) return 110;
-  if (name.startsWith(q)) return 95;
-  if (text.includes(q)) return 75;
-  if (terms.length && terms.every((term) => text.includes(term))) return 60;
-  return 0;
+  if (sku === compactQ || name === q) score = Math.max(score, 1000);
+  else if (sku.startsWith(compactQ)) score = Math.max(score, 860);
+  else if (compactQ.length >= 4 && sku.includes(compactQ)) score = Math.max(score, 700);
+
+  if (name.startsWith(q)) score = Math.max(score, 720);
+  else if (name.includes(q)) score = Math.max(score, 590);
+  if (location.includes(q)) score = Math.max(score, 430);
+  if (season.includes(q)) score = Math.max(score, 320);
+  if (terms.length && terms.every((term) => text.includes(term))) score = Math.max(score, 340 + terms.length * 24);
+
+  score += fuzzyTokenScore(name, terms) * 4;
+  score += fuzzyTokenScore(location, terms) * 2;
+  const startTime = new Date(event.start).getTime();
+  if (score > 0 && Number.isFinite(startTime)) {
+    const now = Date.now();
+    const monthsAway = Math.abs(startTime - now) / (1000 * 60 * 60 * 24 * 30);
+    score += Math.max(0, 52 - Math.round(monthsAway));
+  }
+  return score;
+}
+
+export function eventSuggestionReason(event: RoboEvent, query: string) {
+  const q = normalized(query);
+  const compactQ = compact(query);
+  const sku = compact(event.sku);
+  const name = normalized(event.name);
+  const location = normalized([event.location?.city, event.location?.region, event.location?.country].filter(Boolean).join(" "));
+  const season = normalized(event.season?.name);
+  const terms = queryTerms(query);
+  if (sku === compactQ) return "Exact event SKU";
+  if (sku.startsWith(compactQ)) return "Event SKU prefix";
+  if (name.includes(q)) return "Tournament name match";
+  if (location.includes(q)) return "City or region match";
+  if (season.includes(q)) return "Season match";
+  if (terms.length && terms.every((term) => normalized(`${event.sku} ${event.name} ${location} ${season}`).includes(term))) return "Multi-word match";
+  return "RobotEvents tournament";
 }
 
 export function filterEventsForQuery(events: RoboEvent[], query: string): RoboEvent[] {
@@ -254,9 +374,9 @@ export async function teamEvents(teamId: number): Promise<RoboEvent[]> {
 export async function searchEvents(query: string): Promise<RoboEvent[]> {
   const q = query.trim();
   if (q.length < 2) return [];
-  const skuPath = `/events?sku%5B%5D=${encodeURIComponent(q)}&per_page=30`;
-  const searchPath = `/events?search=${encodeURIComponent(q)}&per_page=50`;
-  const currentSeasonPath = `/events?search=${encodeURIComponent(q)}&season%5B%5D=197&per_page=50`;
+  const skuPath = `/events?sku%5B%5D=${encodeURIComponent(q)}&per_page=100`;
+  const searchPath = `/events?search=${encodeURIComponent(q)}&per_page=100`;
+  const currentSeasonPath = `/events?search=${encodeURIComponent(q)}&season%5B%5D=197&per_page=100`;
   const attempts = /^RE-/i.test(q) ? [skuPath, searchPath] : [searchPath, currentSeasonPath, skuPath];
   const seen = new Set<number | string>();
   const merged: RoboEvent[] = [];
@@ -483,7 +603,7 @@ export function teamNameFromWinner(winner: RoboAward): string {
 
 export function allianceTeams(alliance: RoboAlliance | undefined): RoboTeamResult[] {
   const teams = alliance?.teams ?? [];
-  return teams
+  const normalizedTeams = teams
     .map((entry) => {
       // RobotEvents match payloads nest a slim team as { team: { id, name, code } }
       // where `name` is actually the team NUMBER (e.g. "229V"). Older/other shapes
@@ -492,9 +612,19 @@ export function allianceTeams(alliance: RoboAlliance | undefined): RoboTeamResul
       const t = maybe.team ?? maybe;
       const number = (t.number ?? (t as { name?: string }).name ?? maybe.number ?? "").toString();
       if (!number) return null;
-      return { id: t.id ?? maybe.id ?? 0, number, team_name: t.team_name ?? maybe.team_name ?? number, organization: "" } satisfies RoboTeamResult;
+      const teamName = t.team_name ?? maybe.team_name ?? number;
+      return { id: t.id ?? maybe.id ?? 0, number, team_name: teamName === number ? "" : teamName, organization: "" } satisfies RoboTeamResult;
     })
     .filter((t): t is RoboTeamResult => Boolean(t?.number));
+  const seen = new Set<string>();
+  return normalizedTeams
+    .filter((team) => {
+      const key = team.number.toUpperCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 2);
 }
 
 export function matchLabel(match: RoboMatch): string {
