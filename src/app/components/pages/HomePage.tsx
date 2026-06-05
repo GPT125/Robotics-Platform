@@ -184,7 +184,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
         {[
           { label: "WIN RATE", value: winRate, icon: Trophy, color: "#ff8c00" },
           { label: "MATCHES", value: scored.length ? String(scored.length) : "—", icon: Target, color: accent },
-          { label: "AWARDS", value: awards.length ? String(awards.length) : "—", icon: Star, color: "#7c3aed" },
+          { label: "AWARDS", value: String(awards.length), icon: Star, color: "#7c3aed" },
           { label: "AVG SCORE", value: avgScore ? String(avgScore) : "—", icon: Zap, color: "#10b981" },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "12px 8px", textAlign: "center" }}>

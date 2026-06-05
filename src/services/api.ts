@@ -52,6 +52,41 @@ export type RoboTeamResult = {
   grade?: string;
 };
 
+function normalized(value?: string | null) {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function queryTerms(query: string) {
+  return normalized(query).split(/\s+/).filter((term) => term.length > 1);
+}
+
+function teamSearchText(team: RoboTeamResult) {
+  return normalized([
+    team.number,
+    team.team_name,
+    team.organization,
+    team.location?.city,
+    team.location?.region,
+    team.location?.country,
+    team.program?.code,
+  ].filter(Boolean).join(" "));
+}
+
+function teamSearchScore(team: RoboTeamResult, query: string) {
+  const q = normalized(query);
+  const number = normalized(team.number);
+  const name = normalized(team.team_name);
+  const text = teamSearchText(team);
+  const terms = queryTerms(query);
+  if (!q) return 0;
+  if (number === q) return 120;
+  if (number.startsWith(q)) return 100;
+  if (name.startsWith(q)) return 85;
+  if (text.includes(q)) return 70;
+  if (terms.length && terms.every((term) => text.includes(term))) return 55;
+  return 0;
+}
+
 // Validate/lookup a team by its exact number via RobotEvents (forces a real team).
 export async function searchTeams(number: string): Promise<RoboTeamResult[]> {
   const q = number.trim().toUpperCase();
@@ -77,12 +112,16 @@ export async function searchTeams(number: string): Promise<RoboTeamResult[]> {
     }
   }
   return merged
+    .map((team) => ({ team, score: teamSearchScore(team, q) }))
+    .filter(({ score }) => score > 0)
     .sort((a, b) => {
-      const exactA = a.number.toUpperCase() === q ? -1 : 0;
-      const exactB = b.number.toUpperCase() === q ? -1 : 0;
-      if (exactA !== exactB) return exactA - exactB;
-      return a.number.localeCompare(b.number);
+      if (b.score !== a.score) return b.score - a.score;
+      const programA = a.team.program?.code === "V5RC" ? 1 : 0;
+      const programB = b.team.program?.code === "V5RC" ? 1 : 0;
+      if (programA !== programB) return programB - programA;
+      return a.team.number.localeCompare(b.team.number);
     })
+    .map(({ team }) => team)
     .slice(0, 25);
 }
 
@@ -168,6 +207,41 @@ export type RoboMatch = {
 
 type DataList<T> = { data?: T[] };
 
+export function eventSearchScore(event: RoboEvent, query: string) {
+  const q = normalized(query);
+  const sku = normalized(event.sku);
+  const name = normalized(event.name);
+  const text = normalized([
+    event.sku,
+    event.name,
+    event.location?.city,
+    event.location?.region,
+    event.location?.country,
+    event.season?.name,
+  ].filter(Boolean).join(" "));
+  const terms = queryTerms(query);
+  if (!q) return 0;
+  if (sku === q || name === q) return 130;
+  if (sku.startsWith(q)) return 110;
+  if (name.startsWith(q)) return 95;
+  if (text.includes(q)) return 75;
+  if (terms.length && terms.every((term) => text.includes(term))) return 60;
+  return 0;
+}
+
+export function filterEventsForQuery(events: RoboEvent[], query: string): RoboEvent[] {
+  return events
+    .map((event) => ({ event, score: eventSearchScore(event, query) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const start = String(b.event.start ?? "").localeCompare(String(a.event.start ?? ""));
+      if (start) return start;
+      return a.event.name.localeCompare(b.event.name);
+    })
+    .map(({ event }) => event);
+}
+
 export async function teamEvents(teamId: number): Promise<RoboEvent[]> {
   try {
     const json = await robotEvents<{ data?: RoboEvent[] }>(`/teams/${teamId}/events?per_page=50`);
@@ -181,8 +255,9 @@ export async function searchEvents(query: string): Promise<RoboEvent[]> {
   const q = query.trim();
   if (q.length < 2) return [];
   const skuPath = `/events?sku%5B%5D=${encodeURIComponent(q)}&per_page=30`;
-  const searchPath = `/events?search=${encodeURIComponent(q)}&per_page=30`;
-  const attempts = /^RE-/i.test(q) ? [skuPath, searchPath] : [searchPath, skuPath];
+  const searchPath = `/events?search=${encodeURIComponent(q)}&per_page=50`;
+  const currentSeasonPath = `/events?search=${encodeURIComponent(q)}&season%5B%5D=197&per_page=50`;
+  const attempts = /^RE-/i.test(q) ? [skuPath, searchPath] : [searchPath, currentSeasonPath, skuPath];
   const seen = new Set<number | string>();
   const merged: RoboEvent[] = [];
   for (const path of attempts) {
@@ -199,15 +274,7 @@ export async function searchEvents(query: string): Promise<RoboEvent[]> {
       // Try the next supported RobotEvents query shape.
     }
   }
-  const qLower = q.toLowerCase();
-  return merged
-    .sort((a, b) => {
-      const aExact = a.sku?.toLowerCase() === qLower || a.name.toLowerCase() === qLower ? 1 : 0;
-      const bExact = b.sku?.toLowerCase() === qLower || b.name.toLowerCase() === qLower ? 1 : 0;
-      if (aExact !== bExact) return bExact - aExact;
-      return String(b.start ?? "").localeCompare(String(a.start ?? ""));
-    })
-    .slice(0, 30);
+  return filterEventsForQuery(merged, q).slice(0, 30);
 }
 
 export async function teamMatches(teamId: number, seasonId?: number): Promise<RoboMatch[]> {

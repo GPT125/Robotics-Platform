@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical } from "lucide-react";
 import { useAccent } from "../AccentContext";
 import { useApp, type RoboTeam, type ScoutNote } from "../AppContext";
@@ -10,6 +10,7 @@ import {
   eventRankings,
   eventSkills,
   eventTeams,
+  filterEventsForQuery,
   matchAlliances,
   matchLabel,
   searchEvents,
@@ -365,6 +366,7 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
   const [selectedYear, setSelectedYear] = useState("");
   const [aiSummary, setAiSummary] = useState("");
   const [matchNoteTarget, setMatchNoteTarget] = useState<RoboMatch | null>(null);
+  const awardsRef = useRef<HTMLDivElement | null>(null);
   const years = useMemo(() => Array.from(new Set(profile.events.map((e) => schoolYear(e.start)).filter(Boolean))).sort().reverse(), [profile.events]);
   const eventIdsForYear = useMemo(() => new Set(profile.events.filter((e) => !selectedYear || schoolYear(e.start) === selectedYear).map((e) => e.id)), [profile.events, selectedYear]);
   const filteredEvents = useMemo(() => profile.events.filter((e) => !selectedYear || schoolYear(e.start) === selectedYear), [profile.events, selectedYear]);
@@ -483,15 +485,25 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
           { label: "CONSIST", val: scoreStdDev == null ? "—" : `+/-${scoreStdDev}`, color: "#f59e0b" },
           { label: "AWARDS", val: filteredAwards.length, color: "#f59e0b" },
           { label: "EVENTS", val: filteredEvents.length, color: "#a855f7" },
-        ].map(({ label, val, color }) => (
-          <div key={label} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "12px 14px" }}>
-            <div style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color }}>{val}</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0", marginTop: 2 }}>{label}</div>
-          </div>
-        ))}
+        ].map(({ label, val, color }) => {
+          const content = (
+            <>
+              <div style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color }}>{val}</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0", marginTop: 2 }}>{label}</div>
+            </>
+          );
+          const cardStyle = { background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "12px 14px", textAlign: "left" as const };
+          return label === "AWARDS" ? (
+            <button key={label} onClick={() => awardsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} style={{ ...cardStyle, cursor: "pointer" }}>
+              {content}
+            </button>
+          ) : (
+            <div key={label} style={cardStyle}>{content}</div>
+          );
+        })}
       </div>
 
-      <div style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16 }}>
+      <div ref={awardsRef} style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16, scrollMarginTop: 12 }}>
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", marginBottom: 10 }}>AI Summary</p>
         <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#b0b4c8", lineHeight: 1.65 }}>
           {aiSummary}
@@ -842,10 +854,10 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
   );
 }
 
-export function LookupPage() {
+export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
   const { accent } = useAccent();
   const { team: appTeam } = useApp();
-  const initialPath = typeof window !== "undefined" ? window.location.pathname : "";
+  const initialPath = resetKey === 0 && typeof window !== "undefined" ? window.location.pathname : "";
   const pathTeam = initialPath.match(/\/teams\/([^/]+)/)?.[1] ?? "";
   const pathEvent = initialPath.match(/\/events\/([^/]+)/)?.[1] ?? "";
   const [tab, setTab] = useState<"teams" | "events">(pathEvent ? "events" : "teams");
@@ -865,7 +877,19 @@ export function LookupPage() {
         const results = q.length >= 2 ? await searchTeams(q) : appTeam ? [appTeam as RoboTeam] : [];
         if (alive) setTeamResults(results);
       } else {
-        const results = q.length >= 2 ? await searchEvents(q) : appTeam ? await teamEvents(appTeam.id) : [];
+        const [robotEventsResults, teamScopedEvents] = q.length >= 2
+          ? await Promise.all([
+              searchEvents(q),
+              appTeam ? teamEvents(appTeam.id).then((events) => filterEventsForQuery(events, q)) : Promise.resolve([]),
+            ])
+          : [[], appTeam ? await teamEvents(appTeam.id) : []];
+        const seen = new Set<number | string>();
+        const results = [...teamScopedEvents, ...robotEventsResults].filter((event) => {
+          const key = event.id || event.sku;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
         if (alive) setEventResults(results);
       }
       if (alive) setLoading(false);

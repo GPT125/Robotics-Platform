@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Send, BrainCircuit, Sparkles, Link2, ChevronDown, ImagePlus, Camera, X, Mic, MicOff, Menu, Plus, Edit3, Check } from "lucide-react";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
-import { askCoach, matchAlliances, matchLabel, teamAwards, teamEvents, teamMatches, type CoachSource, type RoboAward, type RoboEvent, type RoboMatch } from "../../../services/api";
+import { askCoach, matchAlliances, matchLabel, searchTeams, teamAwards, teamEvents, teamMatches, type CoachSource, type RoboAward, type RoboEvent, type RoboMatch } from "../../../services/api";
 import { downscaleImage, readFileAsDataUrl, extractVideoFrames } from "../media";
 
 type Attachment = { id: string; kind: "image" | "video"; preview: string; images: string[] };
@@ -12,7 +12,7 @@ type SpeechRecognitionLike = {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
-  onresult: ((event: { results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null;
+  onresult: ((event: { resultIndex?: number; results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null;
   onend: (() => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
   start: () => void;
@@ -109,6 +109,10 @@ function teamStats(matches: RoboMatch[], teamNumber: string) {
   return { scored, wins, losses, avg, max, winRate };
 }
 
+function extractTeamNumber(text: string) {
+  return text.toUpperCase().match(/\b\d{1,6}[A-Z]{1,3}\b/)?.[0] ?? "";
+}
+
 function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -179,9 +183,12 @@ export function CoachPage() {
   const [listening, setListening] = useState(false);
   const [robotEventsData, setRobotEventsData] = useState<{ events: RoboEvent[]; matches: RoboMatch[]; awards: RoboAward[] }>({ events: [], matches: [], awards: [] });
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const inputRef = useRef("");
   const voiceBaseRef = useRef("");
   const voiceFinalRef = useRef("");
   const manualStopRef = useRef(false);
+  const voiceSendAfterStopRef = useRef(false);
+  const voiceRestartTimerRef = useRef<number | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0];
@@ -190,6 +197,16 @@ export function CoachPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping, attachments]);
+
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
+  useEffect(() => () => {
+    manualStopRef.current = true;
+    if (voiceRestartTimerRef.current) window.clearTimeout(voiceRestartTimerRef.current);
+    try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     if (!activeSessionId && sessions[0]) setActiveSessionId(sessions[0].id);
@@ -295,6 +312,50 @@ export function CoachPage() {
     return parts.filter(Boolean).join(" ");
   }
 
+  async function groundedTeamAnswer(text: string): Promise<{ answer: string; sources: CoachSource[] } | null> {
+    const number = extractTeamNumber(text);
+    if (!number) return null;
+    const teams = await searchTeams(number);
+    const exact = teams.find((t) => t.number.toUpperCase() === number) ?? teams[0];
+    if (!exact) return null;
+
+    const [events, matches, awards] = await Promise.all([
+      teamEvents(exact.id),
+      teamMatches(exact.id),
+      teamAwards(exact.id),
+    ]);
+    const stats = teamStats(matches, exact.number);
+    const recent = matches
+      .filter((match) => scoreForTeam(match, exact.number))
+      .slice(0, 5)
+      .map((match) => {
+        const score = scoreForTeam(match, exact.number);
+        return `${matchLabel(match)}: ${score?.won ? "win" : "loss"} ${score?.ours}-${score?.theirs}${match.event?.name ? ` at ${match.event.name}` : ""}`;
+      });
+    const currentEvents = events.slice(0, 5).map((event) => `${event.name} (${shortDate(event.start)})`);
+    const awardLine = awards.length
+      ? awards.slice(0, 5).map((award) => `${awardTitle(award)}${award.event?.name ? ` at ${award.event.name}` : ""}`).join("; ")
+      : "0 awards found in official RobotEvents data for this view";
+
+    const statLine = stats.scored.length
+      ? `${stats.wins}-${stats.losses} record, ${stats.winRate}% win rate, ${stats.avg ?? "unknown"} average score, ${stats.max ?? "unknown"} max score across ${stats.scored.length} scored matches`
+      : "not enough scored matches were found for a reliable win-rate summary";
+    const answer = [
+      `**${exact.number} ${exact.team_name || "Team"}** is listed as ${exact.organization || "organization unavailable"}${exact.location?.city || exact.location?.region ? ` in ${[exact.location?.city, exact.location?.region].filter(Boolean).join(", ")}` : ""}.`,
+      `Official RobotEvents summary: ${statLine}.`,
+      currentEvents.length ? `Recent/current events I found: ${currentEvents.join("; ")}.` : "I did not find recent event records for this team in the current RobotEvents response.",
+      `Awards: ${awardLine}.`,
+      recent.length ? `Recent scored matches: ${recent.join("; ")}.` : "Recent scored match detail is limited, so confidence is medium-low.",
+      "Recommendation: use this official data with your RoboLab scout notes before making alliance or match-strategy decisions.",
+    ].join("\n\n");
+    return {
+      answer,
+      sources: [
+        { title: `RobotEvents team ${exact.number}`, url: `https://www.robotevents.com/teams/V5RC/${encodeURIComponent(exact.number)}`, blurb: "Official team identity and competition records." },
+      ],
+    };
+  }
+
   async function onFiles(list: FileList | null) {
     if (!list || !list.length) return;
     setProcessing(true);
@@ -316,14 +377,31 @@ export function CoachPage() {
     }
   }
 
-  function toggleVoice() {
-    const win = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
-    if (listening) {
-      manualStopRef.current = true;
-      recognitionRef.current?.stop();
+  function stopVoice(sendAfterStop = false) {
+    manualStopRef.current = true;
+    voiceSendAfterStopRef.current = sendAfterStop;
+    if (voiceRestartTimerRef.current) {
+      window.clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
+    }
+    const recognition = recognitionRef.current;
+    if (!recognition) {
       setListening(false);
+      if (sendAfterStop && inputRef.current.trim()) window.setTimeout(() => void send(inputRef.current), 0);
       return;
     }
+    try {
+      recognition.stop();
+    } catch {
+      recognitionRef.current = null;
+      setListening(false);
+      if (sendAfterStop && inputRef.current.trim()) window.setTimeout(() => void send(inputRef.current), 0);
+    }
+  }
+
+  function toggleVoice() {
+    const win = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
+    if (listening) { stopVoice(false); return; }
     const SpeechRecognition = win.SpeechRecognition ?? win.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "Voice input is not available in this browser. Use Chrome or Safari, or type your message.", time: getTime() }]);
@@ -336,10 +414,11 @@ export function CoachPage() {
     voiceBaseRef.current = input.trim();
     voiceFinalRef.current = "";
     manualStopRef.current = false;
+    voiceSendAfterStopRef.current = false;
     recognition.onresult = (event) => {
       let interim = "";
       let finalText = voiceFinalRef.current;
-      for (let i = 0; i < event.results.length; i++) {
+      for (let i = event.resultIndex ?? 0; i < event.results.length; i++) {
         const item = event.results[i];
         if (item.isFinal) finalText += ` ${item[0].transcript}`;
         else interim += item[0].transcript;
@@ -353,6 +432,8 @@ export function CoachPage() {
       // Permission/hardware errors should stop and inform; transient ones let onend restart.
       if (err === "not-allowed" || err === "service-not-allowed" || err === "audio-capture") {
         manualStopRef.current = true;
+        voiceSendAfterStopRef.current = false;
+        recognitionRef.current = null;
         setListening(false);
         if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "I couldn't access your microphone. Allow mic access for this site (browser address bar) and tap the mic again.", time: getTime() }]);
       }
@@ -360,12 +441,21 @@ export function CoachPage() {
     // Browsers fire onend after short silence even when continuous — auto-restart
     // so the mic stays on until the user taps it off.
     recognition.onend = () => {
-      if (manualStopRef.current) { setListening(false); return; }
-      try { recognition.start(); } catch { setListening(false); }
+      if (manualStopRef.current) {
+        const shouldSend = voiceSendAfterStopRef.current;
+        voiceSendAfterStopRef.current = false;
+        recognitionRef.current = null;
+        setListening(false);
+        if (shouldSend && inputRef.current.trim()) window.setTimeout(() => void send(inputRef.current), 0);
+        return;
+      }
+      voiceRestartTimerRef.current = window.setTimeout(() => {
+        try { recognition.start(); } catch { recognitionRef.current = null; setListening(false); }
+      }, 180);
     };
     recognitionRef.current = recognition;
     setListening(true);
-    try { recognition.start(); } catch { setListening(false); }
+    try { recognition.start(); } catch { recognitionRef.current = null; setListening(false); }
   }
 
   const send = async (text: string) => {
@@ -382,6 +472,11 @@ export function CoachPage() {
     setAttachments([]);
     setIsTyping(true);
     try {
+      const grounded = images.length ? null : await groundedTeamAnswer(userText);
+      if (grounded) {
+        updateSessionMessages(sessionId, (prev) => [...prev, { role: "ai", text: grounded.answer, time: getTime(), sources: grounded.sources }]);
+        return;
+      }
       const result = await askCoach({ messages: [...history, { role: "user", content: userText }], context: platformContext(), images });
       updateSessionMessages(sessionId, (prev) => [...prev, { role: "ai", text: result.answer, time: getTime(), sources: result.sources }]);
     } catch (err) {
@@ -545,7 +640,7 @@ export function CoachPage() {
             <Camera size={17} style={{ color: "rgba(255,255,255,0.5)" }} />
             <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { onFiles(e.target.files); e.currentTarget.value = ""; }} />
           </label>
-          <button onClick={toggleVoice} style={{ width: 34, height: 34, borderRadius: 10, background: listening ? `${accent}20` : "transparent", border: listening ? `1px solid ${accent}35` : "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+          <button aria-label={listening ? "Stop voice input" : "Start voice input"} onClick={toggleVoice} style={{ width: 34, height: 34, borderRadius: 10, background: listening ? `${accent}20` : "transparent", border: listening ? `1px solid ${accent}35` : "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
             {listening ? <MicOff size={17} style={{ color: accent }} /> : <Mic size={17} style={{ color: "rgba(255,255,255,0.5)" }} />}
           </button>
           {listening ? (
@@ -559,12 +654,17 @@ export function CoachPage() {
             ref={taRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); listening ? stopVoice(true) : send(input); } }}
             placeholder="Ask your coach anything..."
             rows={1}
             style={{ flex: 1, background: "transparent", border: "none", outline: "none", resize: "none", maxHeight: 120, fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#e8eaf0", padding: "8px 2px", lineHeight: 1.4 }}
           />
-          <button onClick={() => send(input)} disabled={(!input.trim() && !attachments.length) || isTyping} style={{ width: 36, height: 36, borderRadius: 10, background: (input.trim() || attachments.length) && !isTyping ? accent : "rgba(255,255,255,0.06)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: (input.trim() || attachments.length) && !isTyping ? "pointer" : "default", transition: "all 0.2s", flexShrink: 0, boxShadow: (input.trim() || attachments.length) && !isTyping ? `0 0 12px ${accent}50` : "none" }}>
+          <button
+            aria-label={listening ? "Stop recording and send" : "Send message"}
+            onClick={() => listening ? stopVoice(true) : send(input)}
+            disabled={(!input.trim() && !attachments.length) || isTyping}
+            style={{ width: 36, height: 36, borderRadius: 10, background: (input.trim() || attachments.length) && !isTyping ? accent : "rgba(255,255,255,0.06)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: (input.trim() || attachments.length) && !isTyping ? "pointer" : "default", transition: "all 0.2s", flexShrink: 0, boxShadow: (input.trim() || attachments.length) && !isTyping ? `0 0 12px ${accent}50` : "none" }}
+          >
             <Send size={15} style={{ color: (input.trim() || attachments.length) && !isTyping ? "#08090f" : "rgba(255,255,255,0.2)" }} />
           </button>
         </div>

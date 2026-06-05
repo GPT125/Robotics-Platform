@@ -22,17 +22,25 @@ export default function App() {
     if (path.includes("/settings")) return "settings";
     return "home";
   });
+  const [lookupResetKey, setLookupResetKey] = useState(0);
   const [forceOnboarding, setForceOnboarding] = useState(false);
 
+  const changePage = (id: string) => {
+    if (id === "lookup" && activePage === "lookup") {
+      setLookupResetKey((key) => key + 1);
+    }
+    setActivePage(id);
+  };
+
   const pages: Record<string, React.ReactNode> = {
-    home: <HomePage onNavigate={setActivePage} />,
-    lookup: <LookupPage />,
+    home: <HomePage onNavigate={changePage} />,
+    lookup: <LookupPage resetKey={lookupResetKey} />,
     coach: <CoachPage />,
     scout: <ScoutPage />,
     messages: <MessagesPage onSignIn={() => setForceOnboarding(true)} />,
     settings: <SettingsPage onSignIn={() => setForceOnboarding(true)} />,
-    todos: <TodoPage onBack={() => setActivePage("home")} />,
-    alliance: <AlliancePage onBack={() => setActivePage("home")} />,
+    todos: <TodoPage onBack={() => changePage("home")} />,
+    alliance: <AlliancePage onBack={() => changePage("home")} />,
   };
 
   const isSubPage = activePage === "todos" || activePage === "alliance";
@@ -55,11 +63,11 @@ export default function App() {
                 zIndex: 0,
               }}
             />
-            <div key={activePage} style={{ position: "relative", zIndex: 1, minHeight: "100dvh", animation: "pageIn 0.32s cubic-bezier(0.22,1,0.36,1)" }}>
+            <div key={`${activePage}-${activePage === "lookup" ? lookupResetKey : 0}`} style={{ position: "relative", zIndex: 1, minHeight: "100dvh", animation: "pageIn 0.32s cubic-bezier(0.22,1,0.36,1)" }}>
               {pages[activePage]}
             </div>
 
-            {!isSubPage ? <BottomNav active={activePage} onChange={setActivePage} /> : null}
+            {!isSubPage ? <BottomNav active={activePage} onChange={changePage} /> : null}
             {activePage !== "settings" || forceOnboarding ? <Onboarding forceAuth={forceOnboarding} onComplete={() => setForceOnboarding(false)} /> : null}
           </div>
         </div>
