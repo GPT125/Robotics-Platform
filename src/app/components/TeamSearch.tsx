@@ -32,12 +32,13 @@ export function TeamSearch({ onSelect, selectedId }: { onSelect: (team: RoboTeam
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Enter your team number (e.g. 24B)"
+          placeholder="Search team number, name, or school…"
           autoFocus
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#e8eaf0", fontFamily: "'Inter', sans-serif", fontSize: 14 }}
         />
       </div>
 
+      {q.trim().length >= 2 ? <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}>{loading ? "SEARCHING ROBOTEVENTS" : results.length ? "SMART SUGGESTIONS" : "NO SUGGESTIONS"}</p> : null}
       <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 280, overflowY: "auto", scrollbarWidth: "none" }}>
         {results.map((t) => {
           const sel = t.id === selectedId;
@@ -58,7 +59,7 @@ export function TeamSearch({ onSelect, selectedId }: { onSelect: (team: RoboTeam
           );
         })}
         {touched && !loading && q.trim().length >= 2 && results.length === 0 ? (
-          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#7a80a0", padding: "8px 4px" }}>No team found for “{q}”. Enter the full team number exactly (e.g. 24B, 8059A).</p>
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#7a80a0", padding: "8px 4px" }}>No team found for “{q}”. Try the team number, school name, or organization.</p>
         ) : null}
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>

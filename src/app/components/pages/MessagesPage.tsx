@@ -231,7 +231,7 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
       </div>
 
       {showNewConvo && (
-        <div onClick={() => setShowNewConvo(false)} style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0", boxSizing: "border-box", background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
+        <div onClick={() => setShowNewConvo(false)} style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box", background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 402, background: "#0d0f1c", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)", padding: "0 18px 24px", boxShadow: "0 18px 60px rgba(0,0,0,0.45)", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)" }}>
             <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 8px" }}><div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)" }} /></div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>

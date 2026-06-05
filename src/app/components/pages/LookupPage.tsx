@@ -82,6 +82,20 @@ function mostRecentSchoolYear(events: RoboEvent[]) {
   return events.map((e) => schoolYear(e.start)).filter(Boolean).sort().reverse()[0] ?? "";
 }
 
+function cleanAiSummary(text: string, fallback: string) {
+  const cleaned = text
+    .replace(/^confidence:.*$/gim, "")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^["“”]+|["“”]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || fallback;
+}
+
 function scoreForTeam(match: RoboMatch, teamNumber: string) {
   const { red, blue, redTeams, blueTeams } = matchAlliances(match);
   const redScore = Number(red?.score);
@@ -134,6 +148,92 @@ function prediction(match: RoboMatch, rankings: RoboRanking[]) {
   const delta = Math.max(-28, Math.min(28, blueRank - redRank));
   const red = Math.max(20, Math.min(80, Math.round(50 + delta)));
   return { red, blue: 100 - red, pick: red >= 50 ? "red" : "blue" };
+}
+
+function gaussianSolve(a: number[][], b: number[]) {
+  const n = b.length;
+  const m = a.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < n; col++) {
+    let pivot = col;
+    for (let row = col + 1; row < n; row++) {
+      if (Math.abs(m[row][col]) > Math.abs(m[pivot][col])) pivot = row;
+    }
+    if (Math.abs(m[pivot][col]) < 1e-8) continue;
+    [m[col], m[pivot]] = [m[pivot], m[col]];
+    const div = m[col][col] || 1;
+    for (let j = col; j <= n; j++) m[col][j] /= div;
+    for (let row = 0; row < n; row++) {
+      if (row === col) continue;
+      const factor = m[row][col];
+      for (let j = col; j <= n; j++) m[row][j] -= factor * m[col][j];
+    }
+  }
+  return m.map((row) => Number.isFinite(row[n]) ? row[n] : 0);
+}
+
+function solveLeastSquares(rows: number[][], values: number[], size: number) {
+  if (!rows.length || !size) return Array(size).fill(0) as number[];
+  const ata = Array.from({ length: size }, () => Array(size).fill(0));
+  const atb = Array(size).fill(0);
+  const lambda = 0.01;
+  rows.forEach((row, idx) => {
+    const y = values[idx] ?? 0;
+    for (let i = 0; i < size; i++) {
+      if (!row[i]) continue;
+      atb[i] += row[i] * y;
+      for (let j = 0; j < size; j++) {
+        if (row[j]) ata[i][j] += row[i] * row[j];
+      }
+    }
+  });
+  for (let i = 0; i < size; i++) ata[i][i] += lambda;
+  return gaussianSolve(ata, atb);
+}
+
+function eventAnalytics(profile: EventProfile) {
+  const numbers = new Set<string>();
+  profile.teams.forEach((team) => numbers.add(team.number));
+  profile.matches.forEach((match) => {
+    const { redTeams, blueTeams } = matchAlliances(match);
+    redTeams.forEach((team) => numbers.add(team.number));
+    blueTeams.forEach((team) => numbers.add(team.number));
+  });
+  const teamNumbers = [...numbers].filter(Boolean).sort();
+  const index = new Map(teamNumbers.map((number, i) => [number, i]));
+  const rows: number[][] = [];
+  const oprY: number[] = [];
+  const dprY: number[] = [];
+  const ccwmY: number[] = [];
+  for (const match of profile.matches) {
+    const { red, blue, redTeams, blueTeams } = matchAlliances(match);
+    const redScore = Number(red?.score);
+    const blueScore = Number(blue?.score);
+    if (Number.isNaN(redScore) || Number.isNaN(blueScore) || (!redTeams.length && !blueTeams.length)) continue;
+    const redRow = Array(teamNumbers.length).fill(0);
+    const blueRow = Array(teamNumbers.length).fill(0);
+    redTeams.forEach((team) => { const i = index.get(team.number); if (i != null) redRow[i] = 1; });
+    blueTeams.forEach((team) => { const i = index.get(team.number); if (i != null) blueRow[i] = 1; });
+    if (redRow.some(Boolean)) {
+      rows.push(redRow);
+      oprY.push(redScore);
+      dprY.push(blueScore);
+      ccwmY.push(redScore - blueScore);
+    }
+    if (blueRow.some(Boolean)) {
+      rows.push(blueRow);
+      oprY.push(blueScore);
+      dprY.push(redScore);
+      ccwmY.push(blueScore - redScore);
+    }
+  }
+  const opr = solveLeastSquares(rows, oprY, teamNumbers.length);
+  const dpr = solveLeastSquares(rows, dprY, teamNumbers.length);
+  const ccwm = solveLeastSquares(rows, ccwmY, teamNumbers.length);
+  return new Map(teamNumbers.map((number, i) => [number, {
+    opr: Math.round(opr[i] * 10) / 10,
+    dpr: Math.round(dpr[i] * 10) / 10,
+    ccwm: Math.round(ccwm[i] * 10) / 10,
+  }]));
 }
 
 function awardCandidates(awardName: string, profile: EventProfile) {
@@ -215,7 +315,7 @@ function MatchScoutSheet({ team, match, accent, onClose, onSave }: { team: RoboT
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 230, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 230, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 402, maxHeight: "78vh", overflowY: "auto", background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 22, padding: "18px 16px 20px", boxShadow: "0 18px 60px rgba(0,0,0,0.45)", animation: "modalDrop 0.26s cubic-bezier(0.22,1,0.36,1)", scrollbarWidth: "none" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div>
@@ -276,19 +376,37 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
   }), [eventIdsForYear, profile.matches, selectedYear]);
   const filteredAwards = useMemo(() => profile.awards.filter((a) => !selectedYear || !a.event?.id || eventIdsForYear.has(a.event.id)), [eventIdsForYear, profile.awards, selectedYear]);
   const stats = teamStats(filteredMatches, seed.number);
+  const scoredScores = stats.scored.map((s) => s.ours);
+  const scoreStdDev = scoredScores.length > 1
+    ? Math.round(Math.sqrt(scoredScores.reduce((sum, score) => sum + Math.pow(score - (stats.avg ?? 0), 2), 0) / scoredScores.length))
+    : null;
+  const recentFive = filteredMatches.map((m) => scoreForTeam(m, seed.number)).filter((s): s is NonNullable<typeof s> => Boolean(s)).slice(0, 5);
+  const recentForm = recentFive.length ? `${recentFive.filter((s) => s.won).length}-${recentFive.length - recentFive.filter((s) => s.won).length}` : "—";
   const teamNotes = useMemo(() => scoutNotes.filter((note) => note.teamId.toUpperCase() === seed.number.toUpperCase()).sort((a, b) => b.createdAt - a.createdAt), [scoutNotes, seed.number]);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([teamEvents(seed.id), teamMatches(seed.id), teamAwards(seed.id)]).then(([events, matches, awards]) => {
+    Promise.all([teamEvents(seed.id), teamAwards(seed.id)]).then(([events, awards]) => {
       if (!alive) return;
-      setProfile({ team: seed, events, matches, awards });
+      setProfile({ team: seed, events, matches: [], awards });
       setSelectedYear(mostRecentSchoolYear(events));
       setLoading(false);
     }).catch(() => setLoading(false));
     return () => { alive = false; };
   }, [seed.id]);
+
+  // Fetch matches for the selected season (RobotEvents paginates oldest-first, so
+  // we must filter by season id to get the right year's matches).
+  useEffect(() => {
+    let alive = true;
+    if (!selectedYear || !profile.events.length) return;
+    const seasonId = profile.events.find((e) => schoolYear(e.start) === selectedYear)?.season?.id;
+    teamMatches(seed.id, seasonId).then((matches) => {
+      if (alive) setProfile((p) => ({ ...p, matches }));
+    });
+    return () => { alive = false; };
+  }, [seed.id, selectedYear, profile.events]);
 
   useEffect(() => {
     if (!profile.events.length || loading) return;
@@ -298,21 +416,21 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
   useEffect(() => {
     let alive = true;
     const fallback = stats.scored.length
-      ? `${seed.number} looks ${stats.winRate && stats.winRate >= 60 ? "strong" : stats.winRate && stats.winRate >= 45 ? "competitive" : "developing"} in ${selectedYear || "the selected season"} based on official RobotEvents match data: ${stats.wins} wins, ${stats.losses} losses, ${stats.winRate}% win rate, and ${stats.avg ?? "unknown"} average alliance score. They have ${filteredEvents.length} listed events and ${filteredAwards.length} award records in this view. Use scout notes to judge driver skill, auton quality, and robot reliability.`
-      : `${seed.number} has limited scored RobotEvents match data for ${selectedYear || "this view"}. Check recent events, add scouting notes, and compare against event rankings before making alliance decisions.`;
+      ? `${seed.number} is ${stats.wins}-${stats.losses} in ${selectedYear || "this school year"} with a ${stats.winRate}% win rate, ${stats.avg ?? "unknown"} average alliance score, ${stats.max ?? "unknown"} max score, ${recentForm} recent form, and ${scoreStdDev == null ? "not enough data for score consistency" : `about +/-${scoreStdDev} score consistency`}. They appear in ${filteredEvents.length} official event${filteredEvents.length === 1 ? "" : "s"} and ${filteredAwards.length} award record${filteredAwards.length === 1 ? "" : "s"} for this view.`
+      : `${seed.number} is listed in ${filteredEvents.length} official event${filteredEvents.length === 1 ? "" : "s"} for ${selectedYear || "this school year"} with ${filteredAwards.length} award record${filteredAwards.length === 1 ? "" : "s"} visible in RobotEvents. Match scores are not posted in this view yet, so RoboLab is using tournament participation, awards, and scout notes until scored match data appears.`;
     setAiSummary(fallback);
-    if (loading || !stats.scored.length) return;
+    if (loading || (!stats.scored.length && !filteredEvents.length && !filteredAwards.length)) return;
     askCoach({
       messages: [{
         role: "user",
-        content: `Create a short student-friendly RoboLab scouting summary for team ${seed.number} ${seed.team_name}. Use only this RobotEvents data. Do not mention confidence. Stats: ${stats.wins} wins, ${stats.losses} losses, ${stats.winRate}% win rate, avg score ${stats.avg}, max score ${stats.max}, events ${filteredEvents.map((e) => `${e.name} (${shortDate(e.start)})`).join("; ") || "none"}, awards ${filteredAwards.map(awardTitle).join("; ") || "none"}.`,
+        content: `Create a polished, student-friendly RoboLab scouting summary for team ${seed.number} ${seed.team_name}. Use only this RobotEvents data and do not say "limited scored data" as the main answer. If matches are missing, analyze event activity and awards instead. Return one plain paragraph under 95 words. Do not use markdown, headings, bullets, numbered lists, quotes, or a confidence line. Stats: ${stats.wins} wins, ${stats.losses} losses, ${stats.winRate ?? "unknown"}% win rate, avg score ${stats.avg ?? "unknown"}, max score ${stats.max ?? "unknown"}, recent form ${recentForm}, score consistency ${scoreStdDev == null ? "unknown" : `+/-${scoreStdDev}`}, events ${filteredEvents.map((e) => `${e.name} (${shortDate(e.start)})`).join("; ") || "none"}, awards ${filteredAwards.map(awardTitle).join("; ") || "none"}, scout notes ${teamNotes.map((note) => `${note.matchLabel ?? "note"}: ${note.description}`).slice(0, 4).join("; ") || "none"}.`,
       }],
       context: `RobotEvents team profile for ${seed.number}. Selected school year: ${selectedYear}.`,
     })
-      .then((r) => { if (alive) setAiSummary(r.answer.replace(/^confidence:.*$/gim, "").trim() || fallback); })
+      .then((r) => { if (alive) setAiSummary(cleanAiSummary(r.answer, fallback)); })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [filteredAwards, filteredEvents, loading, seed.number, seed.team_name, selectedYear, stats.avg, stats.losses, stats.max, stats.scored.length, stats.winRate, stats.wins]);
+  }, [filteredAwards, filteredEvents, loading, recentForm, scoreStdDev, seed.number, seed.team_name, selectedYear, stats.avg, stats.losses, stats.max, stats.scored.length, stats.winRate, stats.wins, teamNotes]);
 
   return (
     <div style={{ overflowY: "auto", height: "100%", scrollbarWidth: "none" as const, paddingBottom: 90 }}>
@@ -361,6 +479,8 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
         {[
           { label: "MATCHES", val: stats.scored.length, color: accent },
           { label: "RECORD", val: `${stats.wins}W-${stats.losses}L`, color: "#10b981" },
+          { label: "FORM", val: recentForm, color: "#00c8ff" },
+          { label: "CONSIST", val: scoreStdDev == null ? "—" : `+/-${scoreStdDev}`, color: "#f59e0b" },
           { label: "AWARDS", val: filteredAwards.length, color: "#f59e0b" },
           { label: "EVENTS", val: filteredEvents.length, color: "#a855f7" },
         ].map(({ label, val, color }) => (
@@ -479,8 +599,30 @@ function awardQualificationText(a: RoboAward) {
 function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent; accent: string; onBack: () => void; onTeamClick: (team: RoboTeamResult) => void }) {
   const { addPredictionFeedback } = useApp();
   const [profile, setProfile] = useState<EventProfile>({ event, teams: [], matches: [], awards: [], rankings: [], skills: [] });
-  const [evTab, setEvTab] = useState<"awards" | "teams" | "matches">("awards");
+  const [evTab, setEvTab] = useState<"teams" | "matches" | "rankings" | "skills" | "awards">("matches");
+  const [metricSort, setMetricSort] = useState<"rank" | "opr" | "dpr" | "ccwm">("rank");
   const [loading, setLoading] = useState(true);
+  const analytics = useMemo(() => eventAnalytics(profile), [profile.matches, profile.teams]);
+  const skillsByTeam = useMemo(() => new Map(profile.skills.map((skill) => [skillTeamNumber(skill), skill])), [profile.skills]);
+  const rankingRows = useMemo(() => {
+    const byNumber = new Map(profile.teams.map((team) => [team.number, team]));
+    profile.rankings.forEach((ranking) => {
+      const number = rankingTeamNumber(ranking);
+      if (number && ranking.team && !byNumber.has(number)) byNumber.set(number, ranking.team);
+    });
+    return profile.rankings.map((ranking) => {
+      const number = rankingTeamNumber(ranking);
+      const team = byNumber.get(number) ?? ranking.team;
+      const metric = analytics.get(number) ?? { opr: 0, dpr: 0, ccwm: 0 };
+      return { ranking, number, team, ...metric, skills: skillsByTeam.get(number) };
+    }).sort((a, b) => {
+      if (metricSort === "opr") return b.opr - a.opr;
+      if (metricSort === "dpr") return b.dpr - a.dpr;
+      if (metricSort === "ccwm") return b.ccwm - a.ccwm;
+      return rankFor(a.ranking) - rankFor(b.ranking);
+    });
+  }, [analytics, metricSort, profile.rankings, profile.teams, skillsByTeam]);
+  const skillRows = useMemo(() => [...profile.skills].sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999)), [profile.skills]);
   const qualifyingText = useMemo(() => {
     const qual = profile.awards.flatMap((a) => a.qualifications ?? []).join(" ").toLowerCase();
     const level = `${event.level ?? ""} ${event.event_type ?? ""}`.toLowerCase();
@@ -493,7 +635,7 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([eventTeams(event.id), eventMatches(event.id), eventAwards(event.id), eventRankings(event.id), eventSkills(event.id)]).then(([teams, matches, awards, rankings, skills]) => {
+    Promise.all([eventTeams(event.id), eventMatches(event.id, event.divisions), eventAwards(event.id), eventRankings(event.id, event.divisions), eventSkills(event.id)]).then(([teams, matches, awards, rankings, skills]) => {
       if (!alive) return;
       setProfile({ event, teams, matches, awards, rankings, skills });
       setLoading(false);
@@ -533,13 +675,68 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
         </div>
       </div>
 
-      <div style={{ margin: "0 16px 14px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", background: "#1a1e30", borderRadius: 12, padding: 3 }}>
-        {(["awards", "teams", "matches"] as const).map((t) => (
-          <button key={t} onClick={() => setEvTab(t)} style={{ padding: "8px 4px", borderRadius: 9, fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 11, textTransform: "capitalize", background: evTab === t ? accent : "transparent", color: evTab === t ? "#08090f" : "#7a80a0", border: "none", cursor: "pointer", transition: "all 0.15s" }}>
-            {t === "awards" ? "Awards" : t === "teams" ? "Teams" : "Matches"}
+      <div style={{ margin: "0 16px 14px", display: "flex", gap: 4, background: "#1a1e30", borderRadius: 12, padding: 3, overflowX: "auto", scrollbarWidth: "none" }}>
+        {(["teams", "matches", "rankings", "skills", "awards"] as const).map((t) => (
+          <button key={t} onClick={() => setEvTab(t)} style={{ flex: "1 0 auto", padding: "8px 10px", borderRadius: 9, fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 11, textTransform: "capitalize", background: evTab === t ? accent : "transparent", color: evTab === t ? "#08090f" : "#7a80a0", border: "none", cursor: "pointer", transition: "all 0.15s" }}>
+            {t}
           </button>
         ))}
       </div>
+
+      {evTab === "rankings" && (
+        <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", background: "#1a1e30", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 999, overflow: "hidden" }}>
+            {(["rank", "opr", "dpr", "ccwm"] as const).map((m) => (
+              <button key={m} onClick={() => setMetricSort(m)} style={{ padding: "8px 4px", background: metricSort === m ? "rgba(255,255,255,0.14)" : "transparent", border: "none", borderRight: m !== "ccwm" ? "1px solid rgba(255,255,255,0.12)" : "none", color: metricSort === m ? "#fff" : "#9aa0bf", fontFamily: "'Exo 2', sans-serif", fontSize: 12, fontWeight: 800, textTransform: "uppercase", cursor: "pointer" }}>{m}</button>
+            ))}
+          </div>
+          {rankingRows.map(({ ranking, number, team, opr, dpr, ccwm, skills }) => (
+            <button key={`${number}-${ranking.rank}`} onClick={() => team && onTeamClick(team)} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "13px 14px", textAlign: "left", cursor: team ? "pointer" : "default" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 9, marginBottom: 7 }}>
+                <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 21, color: "#e8eaf0" }}>{number || "TBD"}</span>
+                <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: "#b0b4c8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team?.team_name && team.team_name !== number ? team.team_name : ""}</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "0.8fr 1fr 1fr 1fr", gap: 8, alignItems: "center" }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: accent, fontWeight: 800 }}>#{ranking.rank ?? "—"} {ranking.wins ?? 0}-{ranking.losses ?? 0}-{ranking.ties ?? 0}</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#9aa0bf" }}>{ranking.wp ?? "—"} WP</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#9aa0bf" }}>{ranking.ap ?? "—"} AP</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#9aa0bf" }}>{ranking.sp ?? skills?.score ?? "—"} SP</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5, color: metricSort === "opr" ? accent : "#cfd3e6" }}>{opr.toFixed(1)} OPR</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5, color: metricSort === "dpr" ? accent : "#cfd3e6" }}>{dpr.toFixed(1)} DPR</span>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5, color: metricSort === "ccwm" ? accent : "#cfd3e6" }}>{ccwm.toFixed(1)} CCWM</span>
+              </div>
+            </button>
+          ))}
+          {!rankingRows.length ? <div style={{ textAlign: "center", padding: "44px 20px", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 13 }}>Rankings are not posted yet. OPR/DPR/CCWM appear after scored matches are available.</div> : null}
+        </div>
+      )}
+
+      {evTab === "skills" && (
+        <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {skillRows.map((skill) => {
+            const number = skillTeamNumber(skill);
+            const team = profile.teams.find((t) => t.number === number) ?? skill.team;
+            return (
+              <button key={`${number}-${skill.rank}`} onClick={() => team && onTeamClick(team)} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "13px 14px", display: "flex", alignItems: "center", gap: 12, textAlign: "left", cursor: team ? "pointer" : "default" }}>
+                <div style={{ width: 42, height: 42, borderRadius: 12, background: `${accent}15`, border: `1px solid ${accent}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13, color: accent }}>#{skill.rank ?? "—"}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 18, color: "#e8eaf0" }}>{number || "TBD"} <span style={{ fontFamily: "'Inter', sans-serif", fontWeight: 500, fontSize: 13, color: "#b0b4c8" }}>{team?.team_name && team.team_name !== number ? team.team_name : ""}</span></p>
+                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>Total Score: {skill.score ?? "—"}</p>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#cfd3e6" }}>Driver {skill.driver ?? "—"}</p>
+                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#cfd3e6", marginTop: 4 }}>Prog {skill.programming ?? skill.autonomous ?? "—"}</p>
+                </div>
+              </button>
+            );
+          })}
+          {!skillRows.length ? <div style={{ textAlign: "center", padding: "44px 20px", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 13 }}>Robot Skills results are not posted yet.</div> : null}
+        </div>
+      )}
 
       {evTab === "awards" && (
         <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -629,8 +826,9 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
                     </div>
                   </div>
                 ) : (
-                  <div style={{ padding: "0 14px 12px", display: "flex", justifyContent: "flex-end" }}>
-                    <button onClick={() => sendFeedback(m, redWon ? "red" : "blue")} style={{ background: `${accent}12`, border: `1px solid ${accent}30`, borderRadius: 10, padding: "5px 9px", color: accent, fontFamily: "'Inter', sans-serif", fontSize: 10.5, fontWeight: 700, cursor: "pointer" }}>Send prediction feedback</button>
+                  <div style={{ padding: "0 14px 12px", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, color: redWon ? "#ff6b7a" : "#60d0ff" }}>Final: {redWon ? "Red" : "Blue"} by {Math.abs(redScore - blueScore)}</span>
+                    <button onClick={() => sendFeedback(m, redWon ? "red" : "blue")} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "5px 9px", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 10.5, fontWeight: 700, cursor: "pointer" }}>Result saved</button>
                   </div>
                 )}
               </div>
@@ -681,6 +879,13 @@ export function LookupPage() {
     setSelectedTeam(exact);
   }, [pathTeam, selectedTeam, teamResults]);
 
+  useEffect(() => {
+    if (!pathEvent || selectedEvent || !eventResults.length) return;
+    const decoded = decodeURIComponent(pathEvent).toLowerCase();
+    const exact = eventResults.find((ev) => ev.sku?.toLowerCase() === decoded || ev.name.toLowerCase() === decoded);
+    if (exact) setSelectedEvent(exact);
+  }, [eventResults, pathEvent, selectedEvent]);
+
   if (selectedTeam) {
     return (
       <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -705,7 +910,7 @@ export function LookupPage() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#181c2e", border: `1px solid ${accent}25`, borderRadius: 14, padding: "10px 14px" }}>
           {loading ? <Loader2 size={16} style={{ color: accent, animation: "spin 1s linear infinite", flexShrink: 0 }} /> : <Search size={16} style={{ color: "#7a80a0", flexShrink: 0 }} />}
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tab === "teams" ? "Search exact team number…" : "Search event name or SKU…"} style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#e8eaf0" }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tab === "teams" ? "Search team number, name, or school…" : "Search event name, city, or SKU…"} style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: "13px", color: "#e8eaf0" }} />
           {query && <button onClick={() => setQuery("")} style={{ background: "transparent", border: "none", cursor: "pointer" }}><X size={14} style={{ color: "#7a80a0" }} /></button>}
         </div>
 
@@ -719,7 +924,8 @@ export function LookupPage() {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, scrollbarWidth: "none" }}>
-        {tab === "teams" && teamResults.map((team) => <TeamCard key={team.id} team={team} accent={accent} onClick={() => setSelectedTeam(team)} />)}
+        {query.trim().length >= 2 && (teamResults.length || eventResults.length || loading) ? <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}>{loading ? "SEARCHING ROBOTEVENTS" : "SMART SUGGESTIONS"}</p> : null}
+        {tab === "teams" && teamResults.map((team) => <TeamCard key={`${team.number}-${team.id}`} team={team} accent={accent} onClick={() => setSelectedTeam(team)} />)}
         {tab === "teams" && !teamResults.length ? (
           <div style={{ textAlign: "center", padding: "48px 24px" }}>
             <Users size={34} style={{ color: "#2a2f48", marginBottom: 12 }} />

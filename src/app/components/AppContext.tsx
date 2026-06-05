@@ -86,7 +86,7 @@ export type Conversation = {
 
 export type AppNotification = {
   id: string;
-  type: "match_win" | "match_loss" | "award" | "info";
+  type: "match_win" | "match_loss" | "award" | "message" | "info";
   title: string;
   body: string;
   createdAt: number;

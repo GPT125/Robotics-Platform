@@ -67,7 +67,7 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
   };
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "58px 14px 0", boxSizing: "border-box", background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box", background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}>
       {/* Sheet */}
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, boxSizing: "border-box", background: "#0d0f1c", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)", maxHeight: "84vh", overflowY: "auto", scrollbarWidth: "none", boxShadow: "0 18px 60px rgba(0,0,0,0.45)", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)" }}>
         {/* Handle */}

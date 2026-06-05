@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Trophy, Zap, Target, Clock, TrendingUp, ChevronRight, Star, AlertCircle, ListChecks, Plus, WifiOff } from "lucide-react";
+import { Trophy, Zap, Target, Clock, TrendingUp, ChevronRight, Star, AlertCircle, ListChecks, Plus, WifiOff, MessageCircle } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
@@ -51,6 +51,7 @@ function notificationColor(type?: string) {
   if (type === "match_win") return "#10b981";
   if (type === "match_loss") return "#ff8c00";
   if (type === "award") return "#f59e0b";
+  if (type === "message") return "#00c8ff";
   return "#00c8ff";
 }
 
@@ -60,7 +61,7 @@ function awardTitle(award: RoboAward) {
 
 export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
   const { accent } = useAccent();
-  const { todos, team, profile, notifications, addNotification } = useApp();
+  const { todos, team, profile, conversations, notifications, addNotification } = useApp();
   const [matches, setMatches] = useState<RoboMatch[]>([]);
   const [events, setEvents] = useState<RoboEvent[]>([]);
   const [awards, setAwards] = useState<RoboAward[]>([]);
@@ -78,15 +79,22 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
     }
     setLoading(true);
     setStale(false);
-    Promise.all([teamMatches(team.id), teamEvents(team.id), teamAwards(team.id)])
-      .then(([m, e, a]) => {
+    (async () => {
+      try {
+        const [e, a] = await Promise.all([teamEvents(team.id), teamAwards(team.id)]);
         if (!alive) return;
-        setMatches(m);
         setEvents(e);
         setAwards(a);
-      })
-      .catch(() => setStale(true))
-      .finally(() => alive && setLoading(false));
+        const seasonId = [...e].sort((x, y) => (x.start < y.start ? 1 : -1))[0]?.season?.id;
+        const m = await teamMatches(team.id, seasonId);
+        if (!alive) return;
+        setMatches(m);
+      } catch {
+        if (alive) setStale(true);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -123,17 +131,41 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
     localStorage.setItem(key, "1");
   }, [addNotification, awards, team]);
 
-  const scored = useMemo(() => (team ? matches.map((m) => ({ match: m, score: matchScore(m, team.number) })).filter((m) => m.score) : []), [matches, team]);
+  useEffect(() => {
+    const unread = conversations.find((conversation) => conversation.unread > 0);
+    if (!unread) return;
+    const key = `robolab:message-notified:${unread.id}:${unread.lastTime}:${unread.unread}`;
+    if (localStorage.getItem(key)) return;
+    addNotification({
+      type: "message",
+      title: `New message from ${unread.name}`,
+      body: `${unread.lastMessage || "Open Messages to continue the team conversation."}${unread.teamId ? ` · ${unread.teamId}` : ""}`,
+    });
+    localStorage.setItem(key, "1");
+  }, [addNotification, conversations]);
+
+  const currentSchoolYear = mostRecentSchoolYear(events);
+  // Scope all stats to the current school year (season) so numbers reflect this game.
+  const seasonMatches = useMemo(() => {
+    if (!team) return [];
+    if (!currentSchoolYear) return matches;
+    const eventIds = new Set(events.filter((e) => schoolYear(e.start) === currentSchoolYear).map((e) => e.id));
+    return matches.filter((m) => {
+      const y = schoolYear(m.scheduled ?? m.started ?? "");
+      if (y) return y === currentSchoolYear;
+      return m.event?.id ? eventIds.has(m.event.id) : true;
+    });
+  }, [matches, events, team, currentSchoolYear]);
+  const scored = useMemo(() => (team ? seasonMatches.map((m) => ({ match: m, score: matchScore(m, team.number) })).filter((m) => m.score) : []), [seasonMatches, team]);
   const wins = scored.filter((m) => m.score?.won).length;
   const winRate = scored.length ? `${Math.round((wins / scored.length) * 100)}%` : "—";
   const avgScore = scored.length ? Math.round(scored.reduce((sum, m) => sum + (m.score?.ours ?? 0), 0) / scored.length) : null;
-  const sparkData = scored.slice(0, 8).reverse().map((m) => ({ v: m.score?.ours ?? 0 }));
+  const sparkData = scored.slice(0, 12).reverse().map((m) => ({ v: m.score?.ours ?? 0 }));
   const recent = scored.slice(0, 4);
-  const nextMatch = team ? matches.find((m) => !matchScore(m, team.number) && teamSide(m, team.number)) : null;
+  const nextMatch = team ? seasonMatches.find((m) => !matchScore(m, team.number) && teamSide(m, team.number)) : null;
   const freshLabel = stale ? "Stale" : loading ? "Updating" : team ? "Fresh" : "Offline";
   const visibleNotification = notifications.find((n) => !n.seen) ?? notifications[0];
   const nColor = notificationColor(visibleNotification?.type);
-  const currentSchoolYear = mostRecentSchoolYear(events);
   const visibleEvents = currentSchoolYear ? events.filter((e) => schoolYear(e.start) === currentSchoolYear) : events;
 
   return (
@@ -258,7 +290,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
 
       <div style={{ background: `linear-gradient(135deg, ${nColor}18, rgba(17,19,32,0.92))`, border: `1px solid ${nColor}35`, borderRadius: 16, padding: "13px 14px", display: "flex", gap: 11, alignItems: "flex-start", boxShadow: `0 0 22px ${nColor}10` }}>
         <div style={{ width: 32, height: 32, borderRadius: 11, background: `${nColor}18`, border: `1px solid ${nColor}35`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          {visibleNotification?.type === "award" ? <Trophy size={16} style={{ color: nColor }} /> : <AlertCircle size={16} style={{ color: nColor }} />}
+          {visibleNotification?.type === "award" ? <Trophy size={16} style={{ color: nColor }} /> : visibleNotification?.type === "message" ? <MessageCircle size={16} style={{ color: nColor }} /> : <AlertCircle size={16} style={{ color: nColor }} />}
         </div>
         <div>
           <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: nColor }}>{visibleNotification?.title ?? "RoboLab is ready"}</p>
@@ -275,6 +307,18 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
           <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf" }}>{openTasks ? `${openTasks} open task${openTasks > 1 ? "s" : ""}` : "Build, code, notebook & tournament prep"}</p>
         </div>
         <div style={{ width: 30, height: 30, borderRadius: 9, background: accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Plus size={17} style={{ color: "#08090f" }} /></div>
+      </button>
+
+      {/* Alliance Selector (opens a separate AI page, not in the nav) */}
+      <button onClick={() => onNavigate?.("alliance")} style={{ background: "linear-gradient(135deg, #111320 0%, #15122a 100%)", border: `1px solid ${accent}30`, borderRadius: 16, padding: 16, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left" }}>
+        <div style={{ width: 40, height: 40, borderRadius: 12, background: `linear-gradient(135deg, ${accent}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Trophy size={20} style={{ color: "#fff" }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, color: "#e8eaf0" }}>Alliance Selector</p>
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf" }}>AI-ranked partners from live event stats</p>
+        </div>
+        <ChevronRight size={16} style={{ color: accent }} />
       </button>
     </div>
   );

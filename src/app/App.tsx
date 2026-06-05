@@ -10,6 +10,7 @@ import { ScoutPage } from "./components/pages/ScoutPage";
 import { MessagesPage } from "./components/pages/MessagesPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { TodoPage } from "./components/pages/TodoPage";
+import { AlliancePage } from "./components/pages/AlliancePage";
 
 export default function App() {
   const [activePage, setActivePage] = useState(() => {
@@ -31,9 +32,10 @@ export default function App() {
     messages: <MessagesPage onSignIn={() => setForceOnboarding(true)} />,
     settings: <SettingsPage onSignIn={() => setForceOnboarding(true)} />,
     todos: <TodoPage onBack={() => setActivePage("home")} />,
+    alliance: <AlliancePage onBack={() => setActivePage("home")} />,
   };
 
-  const isSubPage = activePage === "todos";
+  const isSubPage = activePage === "todos" || activePage === "alliance";
 
   return (
     <AccentProvider>

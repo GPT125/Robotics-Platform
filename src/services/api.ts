@@ -56,12 +56,34 @@ export type RoboTeamResult = {
 export async function searchTeams(number: string): Promise<RoboTeamResult[]> {
   const q = number.trim().toUpperCase();
   if (!q) return [];
-  try {
-    const json = await robotEvents<{ data?: RoboTeamResult[] }>(`/teams?number%5B%5D=${encodeURIComponent(q)}&per_page=12`);
-    return Array.isArray(json.data) ? json.data : [];
-  } catch {
-    return [];
+  const attempts = [
+    `/teams?number%5B%5D=${encodeURIComponent(q)}&per_page=25`,
+    `/teams?search=${encodeURIComponent(q)}&per_page=25`,
+  ];
+  const seen = new Set<number | string>();
+  const merged: RoboTeamResult[] = [];
+  for (const path of attempts) {
+    try {
+      const json = await robotEvents<{ data?: RoboTeamResult[] }>(path);
+      if (!Array.isArray(json.data)) continue;
+      for (const team of json.data) {
+        const key = team.id || team.number;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(team);
+      }
+    } catch {
+      // Try the next supported RobotEvents query shape.
+    }
   }
+  return merged
+    .sort((a, b) => {
+      const exactA = a.number.toUpperCase() === q ? -1 : 0;
+      const exactB = b.number.toUpperCase() === q ? -1 : 0;
+      if (exactA !== exactB) return exactA - exactB;
+      return a.number.localeCompare(b.number);
+    })
+    .slice(0, 25);
 }
 
 export type RoboEvent = {
@@ -119,6 +141,8 @@ export type RoboSkills = {
   programming?: number;
   driver?: number;
   autonomous?: number;
+  type?: string;
+  attempts?: number;
 };
 
 export type RoboAlliance = {
@@ -156,25 +180,61 @@ export async function teamEvents(teamId: number): Promise<RoboEvent[]> {
 export async function searchEvents(query: string): Promise<RoboEvent[]> {
   const q = query.trim();
   if (q.length < 2) return [];
-  const attempts = [`/events?search=${encodeURIComponent(q)}&per_page=30`, `/events?sku%5B%5D=${encodeURIComponent(q)}&per_page=30`];
+  const skuPath = `/events?sku%5B%5D=${encodeURIComponent(q)}&per_page=30`;
+  const searchPath = `/events?search=${encodeURIComponent(q)}&per_page=30`;
+  const attempts = /^RE-/i.test(q) ? [skuPath, searchPath] : [searchPath, skuPath];
+  const seen = new Set<number | string>();
+  const merged: RoboEvent[] = [];
   for (const path of attempts) {
     try {
       const json = await robotEvents<DataList<RoboEvent>>(path);
-      if (Array.isArray(json.data) && json.data.length) return json.data.sort((a, b) => (a.start < b.start ? 1 : -1));
+      if (!Array.isArray(json.data)) continue;
+      for (const event of json.data) {
+        const key = event.id || event.sku;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(event);
+      }
     } catch {
       // Try the next supported RobotEvents query shape.
     }
   }
-  return [];
+  const qLower = q.toLowerCase();
+  return merged
+    .sort((a, b) => {
+      const aExact = a.sku?.toLowerCase() === qLower || a.name.toLowerCase() === qLower ? 1 : 0;
+      const bExact = b.sku?.toLowerCase() === qLower || b.name.toLowerCase() === qLower ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+      return String(b.start ?? "").localeCompare(String(a.start ?? ""));
+    })
+    .slice(0, 30);
 }
 
-export async function teamMatches(teamId: number): Promise<RoboMatch[]> {
+export async function teamMatches(teamId: number, seasonId?: number): Promise<RoboMatch[]> {
+  // RobotEvents paginates oldest-first, so without a season filter the first page
+  // returns ancient matches. Filtering by season returns the right (current) data.
+  const season = seasonId ? `season%5B%5D=${seasonId}&` : "";
   try {
-    const json = await robotEvents<DataList<RoboMatch>>(`/teams/${teamId}/matches?per_page=100`);
+    const json = await robotEvents<DataList<RoboMatch>>(`/teams/${teamId}/matches?${season}per_page=250`);
     return Array.isArray(json.data) ? json.data.sort((a, b) => String(b.scheduled ?? b.started ?? "").localeCompare(String(a.scheduled ?? a.started ?? ""))) : [];
   } catch {
     return [];
   }
+}
+
+// Seasons a team has competed in, most recent first (id + label).
+export async function teamSeasons(teamId: number): Promise<Array<{ id: number; name: string; year: string }>> {
+  const events = await teamEvents(teamId);
+  const seen = new Map<number, { id: number; name: string; year: string }>();
+  for (const e of events.sort((a, b) => (a.start < b.start ? 1 : -1))) {
+    const s = e.season;
+    if (s?.id && !seen.has(s.id)) {
+      const yr = e.start ? new Date(e.start).getFullYear() : 0;
+      const start = e.start && new Date(e.start).getMonth() >= 7 ? yr : yr - 1;
+      seen.set(s.id, { id: s.id, name: s.name, year: `${start}-${String(start + 1).slice(2)}` });
+    }
+  }
+  return [...seen.values()];
 }
 
 export async function teamAwards(teamId: number): Promise<RoboAward[]> {
@@ -195,10 +255,58 @@ export async function eventTeams(eventId: number): Promise<RoboTeamResult[]> {
   }
 }
 
-export async function eventMatches(eventId: number): Promise<RoboMatch[]> {
+type RoboDivisionRef = { id: number; name?: string };
+
+function sortMatches(matches: RoboMatch[]) {
+  return matches.sort((a, b) => {
+    const division = (a.division?.id ?? 0) - (b.division?.id ?? 0);
+    if (division) return division;
+    const round = (a.round ?? 0) - (b.round ?? 0);
+    if (round) return round;
+    const match = (a.matchnum ?? 0) - (b.matchnum ?? 0);
+    if (match) return match;
+    return (a.instance ?? 0) - (b.instance ?? 0);
+  });
+}
+
+function teamNumberFromApiTeam(team?: Partial<RoboTeamResult> & { name?: string; code?: string } | null) {
+  return (team?.number ?? team?.name ?? "").toString();
+}
+
+function normalizeApiTeam(team?: Partial<RoboTeamResult> & { name?: string; code?: string } | null): RoboTeamResult | undefined {
+  const number = teamNumberFromApiTeam(team);
+  if (!number) return undefined;
+  return {
+    id: team?.id ?? 0,
+    number,
+    team_name: team?.team_name ?? number,
+    organization: team?.organization ?? "",
+    location: team?.location,
+    program: team?.program,
+    grade: team?.grade,
+  };
+}
+
+function normalizeRanking(ranking: RoboRanking): RoboRanking {
+  const team = normalizeApiTeam(ranking.team as unknown as Partial<RoboTeamResult> & { name?: string });
+  return { ...ranking, team, team_number: ranking.team_number ?? team?.number };
+}
+
+export async function eventMatches(eventId: number, divisions?: RoboDivisionRef[]): Promise<RoboMatch[]> {
   try {
+    if (divisions?.length) {
+      const byDivision = (await Promise.all(divisions.map(async (division) => {
+        try {
+          const json = await robotEvents<DataList<RoboMatch>>(`/events/${eventId}/divisions/${division.id}/matches?per_page=250`);
+          return Array.isArray(json.data) ? json.data : [];
+        } catch {
+          return [];
+        }
+      }))).flat();
+      if (byDivision.length) return sortMatches(byDivision);
+    }
     const json = await robotEvents<DataList<RoboMatch>>(`/events/${eventId}/matches?per_page=250`);
-    return Array.isArray(json.data) ? json.data.sort((a, b) => (a.matchnum ?? 0) - (b.matchnum ?? 0)) : [];
+    return Array.isArray(json.data) ? sortMatches(json.data) : [];
   } catch {
     return [];
   }
@@ -213,10 +321,21 @@ export async function eventAwards(eventId: number): Promise<RoboAward[]> {
   }
 }
 
-export async function eventRankings(eventId: number): Promise<RoboRanking[]> {
+export async function eventRankings(eventId: number, divisions?: RoboDivisionRef[]): Promise<RoboRanking[]> {
   try {
+    if (divisions?.length) {
+      const byDivision = (await Promise.all(divisions.map(async (division) => {
+        try {
+          const json = await robotEvents<DataList<RoboRanking>>(`/events/${eventId}/divisions/${division.id}/rankings?per_page=250`);
+          return Array.isArray(json.data) ? json.data.map(normalizeRanking) : [];
+        } catch {
+          return [];
+        }
+      }))).flat();
+      if (byDivision.length) return byDivision;
+    }
     const json = await robotEvents<DataList<RoboRanking>>(`/events/${eventId}/rankings?per_page=250`);
-    return Array.isArray(json.data) ? json.data : [];
+    return Array.isArray(json.data) ? json.data.map(normalizeRanking) : [];
   } catch {
     return [];
   }
@@ -225,7 +344,29 @@ export async function eventRankings(eventId: number): Promise<RoboRanking[]> {
 export async function eventSkills(eventId: number): Promise<RoboSkills[]> {
   try {
     const json = await robotEvents<DataList<RoboSkills>>(`/events/${eventId}/skills?per_page=250`);
-    return Array.isArray(json.data) ? json.data : [];
+    if (!Array.isArray(json.data)) return [];
+    const grouped = new Map<string, RoboSkills>();
+    for (const raw of json.data) {
+      const team = normalizeApiTeam(raw.team as unknown as Partial<RoboTeamResult> & { name?: string });
+      const number = raw.team_number ?? team?.number;
+      if (!number) continue;
+      const existing = grouped.get(number) ?? { team, team_number: number, driver: 0, programming: 0, autonomous: 0, score: 0 };
+      const type = raw.type?.toLowerCase() ?? "";
+      const score = Number(raw.score ?? 0);
+      if (type.includes("driver")) existing.driver = Math.max(existing.driver ?? 0, score);
+      else if (type.includes("program") || type.includes("auton")) {
+        existing.programming = Math.max(existing.programming ?? 0, score);
+        existing.autonomous = Math.max(existing.autonomous ?? 0, score);
+      } else {
+        existing.score = Math.max(existing.score ?? 0, score);
+      }
+      const total = (existing.driver ?? 0) + Math.max(existing.programming ?? 0, existing.autonomous ?? 0);
+      existing.score = Math.max(existing.score ?? 0, total);
+      grouped.set(number, existing);
+    }
+    return [...grouped.values()]
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+      .map((skill, index) => ({ ...skill, rank: index + 1 }));
   } catch {
     return [];
   }
@@ -243,7 +384,7 @@ function awardWinnerEntries(winner: RoboAward): AwardWinnerEntry[] {
 }
 
 export function awardWinnerTeams(winner: RoboAward): RoboTeamResult[] {
-  const direct = winner.team
+  const direct = normalizeApiTeam(winner.team as unknown as Partial<RoboTeamResult> & { name?: string })
     ?? (winner.teamNumber || winner.team_number ? {
       id: 0,
       number: winner.teamNumber ?? winner.team_number ?? "",
@@ -251,8 +392,9 @@ export function awardWinnerTeams(winner: RoboAward): RoboTeamResult[] {
       organization: "",
     } : null);
   const nested = awardWinnerEntries(winner).map((entry) => {
-    if (entry.team?.number) return entry.team;
-    const number = entry.number ?? entry.team_number ?? "";
+    const nestedTeam = normalizeApiTeam(entry.team as unknown as Partial<RoboTeamResult> & { name?: string });
+    if (nestedTeam?.number) return nestedTeam;
+    const number = entry.number ?? entry.team_number ?? entry.name ?? "";
     if (!number) return null;
     return {
       id: entry.id ?? 0,
@@ -276,8 +418,14 @@ export function allianceTeams(alliance: RoboAlliance | undefined): RoboTeamResul
   const teams = alliance?.teams ?? [];
   return teams
     .map((entry) => {
-      const maybe = entry as unknown as { team?: RoboTeamResult; number?: string; team_name?: string; id?: number };
-      return maybe.team ?? (typeof maybe.number === "string" ? ({ id: maybe.id ?? 0, number: maybe.number, team_name: maybe.team_name ?? maybe.number, organization: "" } satisfies RoboTeamResult) : null);
+      // RobotEvents match payloads nest a slim team as { team: { id, name, code } }
+      // where `name` is actually the team NUMBER (e.g. "229V"). Older/other shapes
+      // use { number, team_name }. Handle all of them.
+      const maybe = entry as unknown as { team?: { id?: number; name?: string; number?: string; team_name?: string }; number?: string; team_name?: string; id?: number };
+      const t = maybe.team ?? maybe;
+      const number = (t.number ?? (t as { name?: string }).name ?? maybe.number ?? "").toString();
+      if (!number) return null;
+      return { id: t.id ?? maybe.id ?? 0, number, team_name: t.team_name ?? maybe.team_name ?? number, organization: "" } satisfies RoboTeamResult;
     })
     .filter((t): t is RoboTeamResult => Boolean(t?.number));
 }

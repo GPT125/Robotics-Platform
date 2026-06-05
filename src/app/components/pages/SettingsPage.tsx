@@ -283,7 +283,7 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
 
       {/* Change team modal */}
       {showTeam ? (
-        <div onClick={() => setShowTeam(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0", boxSizing: "border-box" }}>
+        <div onClick={() => setShowTeam(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 20, color: "#fff", margin: 0 }}>Change team</h3>
@@ -296,7 +296,7 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
       ) : null}
 
       {notice ? (
-        <div onClick={() => setNotice(null)} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0", boxSizing: "border-box" }}>
+        <div onClick={() => setNotice(null)} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 19, color: "#fff", margin: 0 }}>RoboLab setup</h3>
@@ -310,7 +310,7 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
 
       {/* Avatar picker modal */}
       {showAvatar ? (
-        <div onClick={() => setShowAvatar(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 14px 0", boxSizing: "border-box" }}>
+        <div onClick={() => setShowAvatar(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 20, color: "#fff", margin: 0 }}>Profile picture</h3>

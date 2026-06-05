@@ -14,7 +14,7 @@ type SpeechRecognitionLike = {
   lang: string;
   onresult: ((event: { results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }> }) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
   start: () => void;
   stop: () => void;
 };
@@ -181,6 +181,7 @@ export function CoachPage() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseRef = useRef("");
   const voiceFinalRef = useRef("");
+  const manualStopRef = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0];
@@ -318,6 +319,7 @@ export function CoachPage() {
   function toggleVoice() {
     const win = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
     if (listening) {
+      manualStopRef.current = true;
       recognitionRef.current?.stop();
       setListening(false);
       return;
@@ -333,6 +335,7 @@ export function CoachPage() {
     recognition.lang = "en-US";
     voiceBaseRef.current = input.trim();
     voiceFinalRef.current = "";
+    manualStopRef.current = false;
     recognition.onresult = (event) => {
       let interim = "";
       let finalText = voiceFinalRef.current;
@@ -345,11 +348,24 @@ export function CoachPage() {
       const spoken = `${voiceFinalRef.current} ${interim}`.replace(/\s+/g, " ").trim();
       if (spoken) setInput([voiceBaseRef.current, spoken].filter(Boolean).join(" "));
     };
-    recognition.onerror = () => setListening(false);
-    recognition.onend = () => setListening(false);
+    recognition.onerror = (event) => {
+      const err = event?.error ?? "";
+      // Permission/hardware errors should stop and inform; transient ones let onend restart.
+      if (err === "not-allowed" || err === "service-not-allowed" || err === "audio-capture") {
+        manualStopRef.current = true;
+        setListening(false);
+        if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "I couldn't access your microphone. Allow mic access for this site (browser address bar) and tap the mic again.", time: getTime() }]);
+      }
+    };
+    // Browsers fire onend after short silence even when continuous — auto-restart
+    // so the mic stays on until the user taps it off.
+    recognition.onend = () => {
+      if (manualStopRef.current) { setListening(false); return; }
+      try { recognition.start(); } catch { setListening(false); }
+    };
     recognitionRef.current = recognition;
     setListening(true);
-    recognition.start();
+    try { recognition.start(); } catch { setListening(false); }
   }
 
   const send = async (text: string) => {
