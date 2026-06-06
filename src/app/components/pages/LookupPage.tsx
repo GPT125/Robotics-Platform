@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical, Sparkles } from "lucide-react";
+import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical, Sparkles, MessageCircle } from "lucide-react";
+import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
-import { useApp, type RoboTeam, type ScoutNote } from "../AppContext";
+import { useApp, type Favorite, type RoboTeam, type ScoutNote } from "../AppContext";
+import { getMatchMindEventTeams, getTournamentChat, joinTournamentChat, listAllianceOffers, sendAllianceOffer, sendTournamentMessage, type TournamentChatSnapshot, type AllianceOffer } from "../../../services/firebaseBackend";
 import {
   allianceTeams,
   awardWinnerTeams,
@@ -12,7 +14,10 @@ import {
   eventSuggestionReason,
   eventTeams,
   filterEventsForQuery,
+  GRADE_OPTIONS,
+  PROGRAM_OPTIONS,
   matchAlliances,
+  matchDisplayModel,
   matchLabel,
   searchEvents,
   searchTeams,
@@ -27,6 +32,8 @@ import {
   type RoboRanking,
   type RoboSkills,
   type RoboTeamResult,
+  type GradeLevel,
+  type ProgramCode,
 } from "../../../services/api";
 
 type TeamProfile = {
@@ -63,6 +70,84 @@ function loc(team: RoboTeamResult) {
 
 function eventLoc(event: RoboEvent) {
   return [event.location?.city, event.location?.region].filter(Boolean).join(", ") || event.location?.country || "Location TBD";
+}
+
+const EVENT_CHAT_INTENT_KEY = "matchmind:event-chat-intent";
+
+function saveEventChatIntent(event: RoboEvent) {
+  const intent = {
+    id: event.id,
+    name: event.name,
+    sku: event.sku,
+    start: event.start,
+    end: event.end,
+    location: eventLoc(event),
+    program: event.program?.code ?? event.sku?.split("-")[0],
+  };
+  window.sessionStorage.setItem(EVENT_CHAT_INTENT_KEY, JSON.stringify(intent));
+}
+
+function eventLivestreamUrl(event: RoboEvent) {
+  const links = [
+    ...(event.links ?? []),
+    ...Object.values(event as unknown as Record<string, unknown>)
+      .filter((value): value is { url?: string; title?: string; label?: string; type?: string } => Boolean(value && typeof value === "object" && "url" in (value as Record<string, unknown>))),
+  ];
+  return links.find((link) => {
+    const label = `${link.title ?? ""} ${link.label ?? ""} ${link.type ?? ""} ${link.url ?? ""}`.toLowerCase();
+    return Boolean(link.url && /(live|stream|youtube|twitch)/.test(label));
+  })?.url ?? "";
+}
+
+function eventDateRange(event: RoboEvent) {
+  const start = event.start ? new Date(event.start) : null;
+  const end = event.end ? new Date(event.end) : start;
+  const safeStart = start && !Number.isNaN(start.getTime()) ? start : new Date();
+  const safeEnd = end && !Number.isNaN(end.getTime()) ? end : safeStart;
+  return { start: safeStart, end: safeEnd };
+}
+
+function googleCalendarUrl(event: RoboEvent) {
+  const { start, end } = eventDateRange(event);
+  const fmt = (d: Date) => d.toISOString().replace(/[-:]|\.\d{3}/g, "");
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: event.name,
+    dates: `${fmt(start)}/${fmt(end)}`,
+    location: eventLoc(event),
+    details: `MatchMind event: ${event.sku}`,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function downloadTextFile(filename: string, body: string, type = "text/plain") {
+  const blob = new Blob([body], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadAppleCalendar(event: RoboEvent) {
+  const { start, end } = eventDateRange(event);
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//MatchMind//Event//EN",
+    "BEGIN:VEVENT",
+    `UID:${event.id || event.sku}@matchmind`,
+    `DTSTAMP:${new Date().toISOString().replace(/[-:]|\.\d{3}/g, "")}`,
+    `DTSTART:${start.toISOString().replace(/[-:]|\.\d{3}/g, "")}`,
+    `DTEND:${end.toISOString().replace(/[-:]|\.\d{3}/g, "")}`,
+    `SUMMARY:${event.name.replace(/\n/g, " ")}`,
+    `LOCATION:${eventLoc(event).replace(/\n/g, " ")}`,
+    `DESCRIPTION:MatchMind event ${event.sku}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+  downloadTextFile(`${event.sku || "matchmind-event"}.ics`, ics, "text/calendar");
 }
 
 function shortDate(value?: string) {
@@ -149,6 +234,12 @@ function teamStats(matches: RoboMatch[], teamNumber: string) {
   const avg = scored.length ? Math.round(scored.reduce((sum, s) => sum + s.ours, 0) / scored.length) : null;
   const max = scored.length ? Math.max(...scored.map((s) => s.ours)) : null;
   return { scored, wins, losses, winRate: scored.length ? Math.round((wins / scored.length) * 100) : null, avg, max };
+}
+
+function matchOrderValue(match: RoboMatch) {
+  const time = new Date(match.scheduled ?? match.started ?? "").getTime();
+  if (Number.isFinite(time)) return time;
+  return ((match.round ?? 0) * 100000) + ((match.instance ?? 0) * 1000) + (match.matchnum ?? match.id ?? 0);
 }
 
 function teamMatchContext(match: RoboMatch, teamNumber: string) {
@@ -294,7 +385,7 @@ function awardCandidates(awardName: string, profile: EventProfile) {
   return { rule: match?.[1] ?? "Judged award. RobotEvents does not include interview or notebook rubric details.", teams: topRanked.slice(0, 4), why: "Likely list uses visible performance data only; judges decide using interview, notebook, conduct, and award rubric evidence." };
 }
 
-function TeamCard({ team, accent, onClick, query, index = 0 }: { team: RoboTeamResult; accent: string; onClick: () => void; query?: string; index?: number }) {
+function TeamCard({ team, accent, onClick, query, index = 0, favorite = false, onToggleFavorite }: { team: RoboTeamResult; accent: string; onClick: () => void; query?: string; index?: number; favorite?: boolean; onToggleFavorite?: () => void }) {
   const reason = query ? teamSuggestionReason(team, query) : team.program?.code ? `${team.program.code} RobotEvents result` : "RobotEvents result";
   return (
     <button className="lookupResultCard" onClick={onClick} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "15px 16px", textAlign: "left", cursor: "pointer", width: "100%", animation: "lookupResultIn 0.3s cubic-bezier(0.22,1,0.36,1) both", animationDelay: `${Math.min(index * 35, 180)}ms`, transition: "transform 0.18s ease, border-color 0.18s ease, background 0.18s ease" }}>
@@ -305,7 +396,13 @@ function TeamCard({ team, accent, onClick, query, index = 0 }: { team: RoboTeamR
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 15, color: "#e8eaf0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team.team_name || team.number}</p>
-            <Star size={12} style={{ color: "rgba(255,255,255,0.18)" }} />
+            <button
+              aria-label={favorite ? "Remove favorite" : "Add favorite"}
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite?.(); }}
+              style={{ background: "transparent", border: "none", padding: 2, cursor: onToggleFavorite ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              <Star size={13} style={{ color: favorite ? "#f59e0b" : "rgba(255,255,255,0.18)", fill: favorite ? "#f59e0b" : "none" }} />
+            </button>
           </div>
           <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#7a80a0", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team.organization || "Organization not listed"}</p>
           <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
@@ -317,6 +414,7 @@ function TeamCard({ team, accent, onClick, query, index = 0 }: { team: RoboTeamR
               <Sparkles size={9} /> {reason}
             </span>
             {team.program?.code ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#8a90aa" }}>{team.program.code}</span> : null}
+            {team.grade ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#8a90aa" }}>{team.grade}</span> : null}
           </div>
         </div>
         <ChevronRight size={16} style={{ color: "rgba(255,255,255,0.2)", marginTop: 10 }} />
@@ -399,12 +497,14 @@ function MatchScoutSheet({ team, match, accent, onClose, onSave }: { team: RoboT
 }
 
 function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResult; accent: string; onBack: () => void; onEventClick: (event: RoboEvent) => void }) {
-  const { scoutNotes, addScoutNote } = useApp();
+  const { scoutNotes, addScoutNote, updateScoutNote, deleteScoutNote } = useApp();
   const [profile, setProfile] = useState<TeamProfile>({ team: seed, events: [], matches: [], awards: [] });
   const [loading, setLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState("");
   const [aiSummary, setAiSummary] = useState("");
   const [matchNoteTarget, setMatchNoteTarget] = useState<RoboMatch | null>(null);
+  const [selectedScoutNote, setSelectedScoutNote] = useState<ScoutNote | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
   const awardsRef = useRef<HTMLDivElement | null>(null);
   const years = useMemo(() => Array.from(new Set(profile.events.map((e) => schoolYear(e.start)).filter(Boolean))).sort().reverse(), [profile.events]);
   const eventIdsForYear = useMemo(() => new Set(profile.events.filter((e) => !selectedYear || schoolYear(e.start) === selectedYear).map((e) => e.id)), [profile.events, selectedYear]);
@@ -424,6 +524,11 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
   const recentFive = filteredMatches.map((m) => scoreForTeam(m, seed.number)).filter((s): s is NonNullable<typeof s> => Boolean(s)).slice(0, 5);
   const recentForm = recentFive.length ? `${recentFive.filter((s) => s.won).length}-${recentFive.length - recentFive.filter((s) => s.won).length}` : "—";
   const teamNotes = useMemo(() => scoutNotes.filter((note) => note.teamId.toUpperCase() === seed.number.toUpperCase()).sort((a, b) => b.createdAt - a.createdAt), [scoutNotes, seed.number]);
+  const trendRows = useMemo(() => filteredMatches
+    .map((match) => ({ match, score: scoreForTeam(match, seed.number) }))
+    .filter((row): row is { match: RoboMatch; score: NonNullable<ReturnType<typeof scoreForTeam>> } => Boolean(row.score))
+    .sort((a, b) => matchOrderValue(a.match) - matchOrderValue(b.match))
+    .map((row) => ({ score: row.score.ours, label: matchLabel(row.match), result: row.score.won ? "Win" : "Loss" })), [filteredMatches, seed.number]);
 
   useEffect(() => {
     let alive = true;
@@ -550,17 +655,41 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
       </div>
 
       <div style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0" }}>Score Trend</p>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#7a80a0" }}>{selectedYear || "season"} · {trendRows.length} scored</span>
+        </div>
+        {trendRows.length ? (
+          <ResponsiveContainer width="100%" height={70}>
+            <LineChart data={trendRows}>
+              <YAxis hide domain={["dataMin - 8", "dataMax + 8"]} />
+              <Tooltip
+                cursor={{ stroke: "rgba(255,255,255,0.08)" }}
+                contentStyle={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}
+                itemStyle={{ color: accent }}
+                labelFormatter={(_, payload) => payload?.[0]?.payload ? `${payload[0].payload.label} · ${payload[0].payload.result}` : "Match"}
+                formatter={(value: number) => [`${value}`, "Score"]}
+              />
+              <Line type="monotone" dataKey="score" stroke={accent} strokeWidth={2.5} dot={false} activeDot={{ r: 4, strokeWidth: 0, fill: "#fff" }} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={{ height: 70, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#5c627e" }}>No official scored matches for this school year yet.</div>
+        )}
+      </div>
+
+      <div style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16 }}>
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", marginBottom: 10 }}>Scout Notes</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {teamNotes.slice(0, 8).map((note) => (
-            <div key={note.id} style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 11, padding: "10px 12px" }}>
+            <button key={note.id} onClick={() => { setSelectedScoutNote(note); setNoteDraft(note.description); }} style={{ width: "100%", textAlign: "left", background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 11, padding: "10px 12px", cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: note.description ? 6 : 0 }}>
                 <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: "#e8eaf0" }}>{note.matchLabel ?? "Team note"}</p>
                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: note.result === "win" ? "#10b981" : note.result === "loss" ? "#ff3b5c" : "#7a80a0", flexShrink: 0 }}>{note.score ?? note.date}</span>
               </div>
               {note.eventName ? <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#7a80a0", marginBottom: 5 }}>{note.eventName}</p> : null}
               {note.description ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#b0b4c8", lineHeight: 1.5 }}>{note.description}</p> : null}
-            </div>
+            </button>
           ))}
           {!teamNotes.length ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#7a80a0" }}>No MatchMind scout notes saved for this team yet.</p> : null}
         </div>
@@ -632,6 +761,24 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
           onSave={(note) => { addScoutNote(note); setMatchNoteTarget(null); }}
         />
       ) : null}
+      {selectedScoutNote ? (
+        <div onClick={() => setSelectedScoutNote(null)} style={{ position: "fixed", inset: 0, zIndex: 235, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 402, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 22, padding: 16, boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: accent }}>{selectedScoutNote.teamId} · {selectedScoutNote.matchLabel ?? "Scout note"}</p>
+                <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 18, color: "#fff", margin: "2px 0 0" }}>{selectedScoutNote.teamName}</h3>
+              </div>
+              <button onClick={() => setSelectedScoutNote(null)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
+            </div>
+            <textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} rows={5} style={{ width: "100%", boxSizing: "border-box", background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 13, padding: "12px 13px", color: "#e8eaf0", outline: "none", resize: "none", fontFamily: "'Inter', sans-serif", fontSize: 13, lineHeight: 1.5, marginBottom: 12 }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button onClick={() => { deleteScoutNote(selectedScoutNote.id); setSelectedScoutNote(null); }} style={{ background: "#ff3b5c18", border: "1px solid #ff3b5c35", borderRadius: 13, padding: "12px", color: "#ff6b7a", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>Delete</button>
+              <button onClick={() => { updateScoutNote(selectedScoutNote.id, { description: noteDraft }); setSelectedScoutNote(null); }} style={{ background: accent, border: "none", borderRadius: 13, padding: "12px", color: "#08090f", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>Save changes</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -647,13 +794,26 @@ function awardQualificationText(a: RoboAward) {
   return `Qualifies for: ${qualifications.join(", ")}`;
 }
 
-function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent; accent: string; onBack: () => void; onTeamClick: (team: RoboTeamResult) => void }) {
+function EventDetail({ event, accent, onBack, onTeamClick, onOpenEventChat }: { event: RoboEvent; accent: string; onBack: () => void; onTeamClick: (team: RoboTeamResult) => void; onOpenEventChat?: (event: RoboEvent) => void }) {
+  const { addScoutNote, team: appTeam, profile: userProfile } = useApp();
   const [profile, setProfile] = useState<EventProfile>({ event, teams: [], matches: [], awards: [], rankings: [], skills: [] });
   const [evTab, setEvTab] = useState<"teams" | "matches" | "rankings" | "skills" | "awards">("matches");
   const [metricSort, setMetricSort] = useState<"rank" | "opr" | "dpr" | "ccwm">("rank");
   const [loading, setLoading] = useState(true);
   const [selectedDayKey, setSelectedDayKey] = useState("");
+  const [matchNoteTarget, setMatchNoteTarget] = useState<{ match: RoboMatch; team: RoboTeamResult } | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportSections, setExportSections] = useState({ teams: true, matches: true, rankings: true, analytics: true, skills: true, awards: true });
+  const [eventPanelOpen, setEventPanelOpen] = useState(false);
+  const [chatSnapshot, setChatSnapshot] = useState<TournamentChatSnapshot | null>(null);
+  const [chatInput, setChatInput] = useState("");
+  const [eventBackendStatus, setEventBackendStatus] = useState("");
+  const [matchMindTeams, setMatchMindTeams] = useState<Array<{ teamNumber: string }>>([]);
+  const [offerTarget, setOfferTarget] = useState("");
+  const [offerMessage, setOfferMessage] = useState("");
+  const [offers, setOffers] = useState<AllianceOffer[]>([]);
   const analytics = useMemo(() => eventAnalytics(profile), [profile.matches, profile.teams]);
+  const livestreamUrl = useMemo(() => eventLivestreamUrl(event), [event]);
   const eventDays = useMemo(() => eventDayKeys(event), [event.end, event.start]);
   const hasDatedMatches = useMemo(() => profile.matches.some((m) => dateKey(m.scheduled ?? m.started ?? "")), [profile.matches]);
   const showDaySlider = eventDays.length > 1 && hasDatedMatches;
@@ -690,6 +850,21 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
     };
   }, [event.event_type, event.level, profile.awards]);
 
+  function exportEventData() {
+    const payload = {
+      event,
+      exportedAt: new Date().toISOString(),
+      teams: exportSections.teams ? profile.teams : undefined,
+      matches: exportSections.matches ? profile.matches : undefined,
+      rankings: exportSections.rankings ? profile.rankings : undefined,
+      oprDprCcwm: exportSections.analytics ? Object.fromEntries(analytics) : undefined,
+      skills: exportSections.skills ? profile.skills : undefined,
+      awards: exportSections.awards ? profile.awards : undefined,
+    };
+    downloadTextFile(`${event.sku || "matchmind-event"}-export.json`, JSON.stringify(payload, null, 2), "application/json");
+    setExportOpen(false);
+  }
+
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -706,6 +881,66 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
     if (!selectedDayKey || !eventDays.includes(selectedDayKey)) setSelectedDayKey(eventDays[0] ?? "");
   }, [eventDays, selectedDayKey, showDaySlider]);
 
+  useEffect(() => {
+    let alive = true;
+    if (!eventPanelOpen) return;
+    Promise.all([
+      getTournamentChat(event.id).catch(() => null),
+      getMatchMindEventTeams(event.id).catch(() => ({ teams: [] })),
+      appTeam ? listAllianceOffers(event.id, appTeam.number).catch(() => ({ offers: [] })) : Promise.resolve({ offers: [] }),
+    ]).then(([chat, teams, eventOffers]) => {
+      if (!alive) return;
+      setChatSnapshot(chat);
+      setMatchMindTeams(teams?.teams ?? []);
+      setOffers(eventOffers.offers ?? []);
+    });
+    return () => { alive = false; };
+  }, [appTeam, event.id, eventPanelOpen]);
+
+  async function joinChat() {
+    if (!appTeam) {
+      setEventBackendStatus("Select your team before joining tournament chat.");
+      return;
+    }
+    try {
+      setEventBackendStatus("Joining event chat...");
+      await joinTournamentChat({ eventId: event.id, displayName: userProfile?.name || appTeam.number, teamNumber: appTeam.number, program: appTeam.program?.code ?? event.program?.code });
+      const [chat, teams] = await Promise.all([getTournamentChat(event.id), getMatchMindEventTeams(event.id)]);
+      setChatSnapshot(chat);
+      setMatchMindTeams(teams.teams);
+      setEventBackendStatus("Joined. Messages show first name and team number only.");
+    } catch (error) {
+      setEventBackendStatus(error instanceof Error ? error.message : "Could not join event chat yet.");
+    }
+  }
+
+  async function sendEventMessage() {
+    const body = chatInput.trim();
+    if (!body) return;
+    try {
+      setEventBackendStatus("Sending...");
+      await sendTournamentMessage({ eventId: event.id, body });
+      setChatInput("");
+      setChatSnapshot(await getTournamentChat(event.id));
+      setEventBackendStatus("Sent.");
+    } catch (error) {
+      setEventBackendStatus(error instanceof Error ? error.message : "Message blocked or failed.");
+    }
+  }
+
+  async function sendOffer() {
+    if (!appTeam || !offerTarget.trim()) return;
+    try {
+      setEventBackendStatus("Sending alliance offer...");
+      await sendAllianceOffer({ eventId: event.id, fromTeam: appTeam.number, toTeam: offerTarget.trim().toUpperCase(), message: offerMessage.trim() || `${appTeam.number} wants to talk alliance strategy.` });
+      setOfferTarget("");
+      setOfferMessage("");
+      setEventBackendStatus("Offer sent if that team is registered with MatchMind and the alliance window is open.");
+    } catch (error) {
+      setEventBackendStatus(error instanceof Error ? error.message : "Alliance offer failed.");
+    }
+  }
+
   return (
     <div style={{ overflowY: "auto", height: "100%", scrollbarWidth: "none" as const, paddingBottom: "var(--rl-page-bottom)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "var(--rl-page-top) 16px 10px" }}>
@@ -713,6 +948,9 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
           <ArrowLeft size={16} style={{ color: "#e8eaf0" }} />
         </button>
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: "15px", color: "#e8eaf0", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.name}</p>
+        <button aria-label="Open event chat" onClick={() => onOpenEventChat?.(event)} style={{ background: `${accent}14`, border: `1px solid ${accent}32`, borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+          <MessageCircle size={16} style={{ color: accent }} />
+        </button>
         {loading ? <Loader2 size={17} style={{ color: accent, animation: "spin 1s linear infinite" }} /> : null}
       </div>
 
@@ -730,7 +968,64 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
             <Globe size={11} /> Event worlds qualifier {qualifyingText.worlds ? "listed" : "not listed"}
           </span>
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: livestreamUrl ? "1fr 1fr" : "1fr 1fr 1fr", gap: 7, marginTop: 12 }}>
+          {livestreamUrl ? (
+            <button onClick={() => window.open(livestreamUrl, "_blank", "noopener,noreferrer")} style={{ background: `${accent}16`, border: `1px solid ${accent}35`, borderRadius: 11, padding: "9px 8px", color: accent, fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, cursor: "pointer" }}>Watch live</button>
+          ) : null}
+          <button onClick={() => window.open(googleCalendarUrl(event), "_blank", "noopener,noreferrer")} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 11, padding: "9px 8px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, cursor: "pointer" }}>Google Cal</button>
+          <button onClick={() => downloadAppleCalendar(event)} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 11, padding: "9px 8px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, cursor: "pointer" }}>Apple Cal</button>
+          <button onClick={() => setExportOpen(true)} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 11, padding: "9px 8px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, cursor: "pointer" }}>Export</button>
+        </div>
+        <button onClick={() => setEventPanelOpen((open) => !open)} style={{ width: "100%", marginTop: 8, background: eventPanelOpen ? `${accent}16` : "rgba(255,255,255,0.04)", border: `1px solid ${eventPanelOpen ? accent + "38" : "rgba(255,255,255,0.08)"}`, borderRadius: 12, padding: "10px 12px", color: eventPanelOpen ? accent : "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+          Tournament chat, MatchMind teams, and alliance offers
+        </button>
       </div>
+
+      {eventPanelOpen ? (
+        <div style={{ margin: "0 16px 14px", background: "#111320", border: `1px solid ${accent}22`, borderRadius: 16, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, color: "#e8eaf0" }}>Tournament Community</p>
+              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf", lineHeight: 1.4 }}>Optional event chat opens 2 days before and closes 12 hours after. Only first names and team numbers show.</p>
+            </div>
+            <button onClick={joinChat} style={{ flexShrink: 0, background: accent, border: "none", borderRadius: 11, padding: "9px 11px", color: "#08090f", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 11.5, cursor: "pointer" }}>Join</button>
+          </div>
+          {eventBackendStatus ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: eventBackendStatus.includes("blocked") || eventBackendStatus.includes("failed") || eventBackendStatus.includes("Could not") ? "#ff6b7a" : "#9aa0bf", lineHeight: 1.45 }}>{eventBackendStatus}</p> : null}
+          <div style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 13, padding: 12 }}>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: "#e8eaf0", marginBottom: 8 }}>Teams using MatchMind</p>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {matchMindTeams.slice(0, 30).map((row) => <span key={row.teamNumber} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: accent, background: `${accent}12`, border: `1px solid ${accent}25`, borderRadius: 999, padding: "4px 8px" }}>{row.teamNumber}</span>)}
+              {!matchMindTeams.length ? <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#7a80a0" }}>No teams have joined this event chat yet.</span> : null}
+            </div>
+          </div>
+          <div style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 13, padding: 12 }}>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: "#e8eaf0", marginBottom: 8 }}>Event chat</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 180, overflowY: "auto", scrollbarWidth: "none", marginBottom: 9 }}>
+              {(chatSnapshot?.messages ?? []).slice(-20).map((message) => (
+                <div key={message.id} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 11, padding: "8px 10px" }}>
+                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: accent }}>{message.firstName} · {message.teamNumber}</p>
+                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#cfd3e6", lineHeight: 1.45, marginTop: 3 }}>{message.body}</p>
+                </div>
+              ))}
+              {!chatSnapshot?.messages?.length ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#7a80a0" }}>Join to start the tournament chat.</p> : null}
+            </div>
+            <div style={{ display: "flex", gap: 7 }}>
+              <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Message event chat..." style={{ flex: 1, minWidth: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#e8eaf0", padding: "9px 10px", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 12.5 }} />
+              <button onClick={sendEventMessage} disabled={!chatInput.trim()} style={{ background: chatInput.trim() ? accent : "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, padding: "0 12px", color: chatInput.trim() ? "#08090f" : "#5c627e", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 12, cursor: chatInput.trim() ? "pointer" : "default" }}>Send</button>
+            </div>
+          </div>
+          <div style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 13, padding: 12 }}>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: "#e8eaf0", marginBottom: 4 }}>Alliance offers</p>
+            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9aa0bf", lineHeight: 1.4, marginBottom: 9 }}>Offers unlock one hour before alliance selection. Event settings can override the exact alliance-selection time.</p>
+            <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1fr", gap: 7, marginBottom: 7 }}>
+              <input value={offerTarget} onChange={(e) => setOfferTarget(e.target.value)} placeholder="Team" style={{ minWidth: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#e8eaf0", padding: "9px 10px", outline: "none", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
+              <input value={offerMessage} onChange={(e) => setOfferMessage(e.target.value)} placeholder="Short offer note" style={{ minWidth: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#e8eaf0", padding: "9px 10px", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 12.5 }} />
+            </div>
+            <button onClick={sendOffer} disabled={!appTeam || !offerTarget.trim()} style={{ width: "100%", background: appTeam && offerTarget.trim() ? accent : "rgba(255,255,255,0.06)", border: "none", borderRadius: 11, padding: "10px", color: appTeam && offerTarget.trim() ? "#08090f" : "#5c627e", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 12.5, cursor: appTeam && offerTarget.trim() ? "pointer" : "default" }}>Send alliance offer</button>
+            {offers.length ? <div style={{ marginTop: 9, display: "flex", flexDirection: "column", gap: 6 }}>{offers.slice(0, 4).map((offer) => <div key={offer.id} style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#cfd3e6", background: "#111320", borderRadius: 9, padding: "7px 9px" }}>{offer.fromTeam}: {offer.message}</div>)}</div> : null}
+          </div>
+        </div>
+      ) : null}
 
       <div style={{ margin: "0 16px 14px", display: "flex", gap: 4, background: "#1a1e30", borderRadius: 12, padding: 3, overflowX: "auto", scrollbarWidth: "none" }}>
         {(["teams", "matches", "rankings", "skills", "awards"] as const).map((t) => (
@@ -863,30 +1158,48 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
             </div>
           ) : null}
           {displayedMatches.map((m) => {
-            const { red, blue, redTeams, blueTeams } = matchAlliances(m);
-            const redScore = Number(red?.score);
-            const blueScore = Number(blue?.score);
-            const scored = !Number.isNaN(redScore) && !Number.isNaN(blueScore);
+            const model = matchDisplayModel(m);
+            const redScore = model.red?.score ?? null;
+            const blueScore = model.blue?.score ?? null;
+            const scored = redScore != null && blueScore != null;
             const redWon = scored && redScore > blueScore;
             const p = prediction(m, profile.rankings);
+            const allTeams = model.format === "head_to_head"
+              ? [...model.redTeams, ...model.blueTeams]
+              : model.alliances.flatMap((alliance) => alliance.teams);
             return (
               <div key={m.id} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
                 <div style={{ padding: "8px 14px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#7a80a0", fontWeight: 600 }}>{matchLabel(m)}{m.field ? ` · ${m.field}` : ""}</span>
                   <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0" }}>{m.scheduled ? new Date(m.scheduled).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Time TBD"}</span>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", padding: "12px 14px", gap: 8, alignItems: "center" }}>
-                  <div style={{ background: "#ff3b5c12", border: "1px solid #ff3b5c25", borderRadius: 10, padding: "8px 10px" }}>
-                    {redTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: redWon ? "#ff6b7a" : "#7a80a0", fontWeight: 600 }}>{teamLine(t)}</p>)}
-                    <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color: redWon ? "#ff3b5c" : "#7a80a0", marginTop: 4 }}>{scored ? redScore : "—"}</p>
+                {model.format === "head_to_head" ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", padding: "12px 14px", gap: 8, alignItems: "center" }}>
+                    <div style={{ background: "#ff3b5c12", border: "1px solid #ff3b5c25", borderRadius: 10, padding: "8px 10px" }}>
+                      {model.redTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: redWon ? "#ff6b7a" : "#9aa0bf", fontWeight: 700 }}>{teamLine(t)}</p>)}
+                      <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 22, color: redWon ? "#ff3b5c" : "#7a80a0", marginTop: 5 }}>{scored ? redScore : "—"}</p>
+                    </div>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.25)" }}>VS</span>
+                    <div style={{ background: "#00c8ff12", border: "1px solid #00c8ff25", borderRadius: 10, padding: "8px 10px", textAlign: "right" }}>
+                      {model.blueTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: scored && !redWon ? "#60d0ff" : "#9aa0bf", fontWeight: 700 }}>{teamLine(t, true)}</p>)}
+                      <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 22, color: scored && !redWon ? "#00c8ff" : "#7a80a0", marginTop: 5 }}>{scored ? blueScore : "—"}</p>
+                    </div>
                   </div>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.2)" }}>VS</span>
-                  <div style={{ background: "#00c8ff12", border: "1px solid #00c8ff25", borderRadius: 10, padding: "8px 10px", textAlign: "right" }}>
-                    {blueTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: scored && !redWon ? "#60d0ff" : "#7a80a0", fontWeight: 600 }}>{teamLine(t, true)}</p>)}
-                    <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color: scored && !redWon ? "#00c8ff" : "#7a80a0", marginTop: 4 }}>{scored ? blueScore : "—"}</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px" }}>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: accent }}>{model.format === "teamwork" ? "Teamwork / cooperative format" : "RobotEvents participant format"}</p>
+                    {model.alliances.map((alliance) => (
+                      <div key={alliance.key} style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "9px 10px", display: "flex", justifyContent: "space-between", gap: 10 }}>
+                        <div>
+                          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12, color: "#e8eaf0" }}>{alliance.label}</p>
+                          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#9aa0bf", marginTop: 3 }}>{alliance.teams.map((t) => teamLine(t)).join(" · ") || "Teams TBD"}</p>
+                        </div>
+                        <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 18, color: alliance.score != null ? accent : "#7a80a0" }}>{alliance.score ?? "—"}</span>
+                      </div>
+                    ))}
                   </div>
-                </div>
-                {!scored ? (
+                )}
+                {!scored && model.canPredict ? (
                   <div style={{ padding: "0 14px 12px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
                       <BrainCircuit size={12} style={{ color: accent }} />
@@ -896,25 +1209,63 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
                       <div style={{ width: `${p.red}%`, height: "100%", background: "#ff3b5c", borderRadius: 6 }} />
                     </div>
                   </div>
-                ) : (
+                ) : scored && model.format === "head_to_head" ? (
                   <div style={{ padding: "0 14px 12px" }}>
-                    <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, color: redWon ? "#ff6b7a" : "#60d0ff" }}>Final: {redWon ? "Red" : "Blue"} by {Math.abs(redScore - blueScore)}</span>
+                    <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, color: redWon ? "#ff6b7a" : "#60d0ff" }}>Final: {redWon ? "Red" : "Blue"} by {Math.abs((redScore ?? 0) - (blueScore ?? 0))}</span>
                   </div>
-                )}
+                ) : null}
+                {allTeams.length ? (
+                  <div style={{ padding: "0 14px 12px", display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+                    {allTeams.map((team) => (
+                      <button key={`${m.id}-${team.number}`} onClick={() => setMatchNoteTarget({ match: m, team })} style={{ flexShrink: 0, minHeight: 32, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "7px 9px", color: "#cfd3e6", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 10.5, cursor: "pointer" }}>Scout {team.number}</button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             );
           })}
           {!displayedMatches.length ? <div style={{ textAlign: "center", padding: "44px 20px", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 13 }}>{showDaySlider ? `No matches scheduled for ${dayLabel(selectedDayKey)}.` : "No matches returned by RobotEvents yet."}</div> : null}
         </div>
       )}
+      {matchNoteTarget ? (
+        <MatchScoutSheet
+          team={matchNoteTarget.team}
+          match={matchNoteTarget.match}
+          accent={accent}
+          onClose={() => setMatchNoteTarget(null)}
+          onSave={(note) => { addScoutNote(note); setMatchNoteTarget(null); }}
+        />
+      ) : null}
+      {exportOpen ? (
+        <div onClick={() => setExportOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 235, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 402, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 22, padding: 16, boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: accent }}>EVENT EXPORT</p>
+                <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 18, color: "#fff", margin: "2px 0 0" }}>{event.sku || "Tournament data"}</h3>
+              </div>
+              <button onClick={() => setExportOpen(false)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+              {Object.entries(exportSections).map(([key, enabled]) => (
+                <label key={key} style={{ display: "flex", alignItems: "center", gap: 9, background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 11, padding: "10px 12px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={enabled} onChange={(e) => setExportSections((prev) => ({ ...prev, [key]: e.target.checked }))} />
+                  <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, color: "#e8eaf0", textTransform: "capitalize" }}>{key === "analytics" ? "OPR / DPR / CCWM" : key}</span>
+                </label>
+              ))}
+            </div>
+            <button onClick={exportEventData} style={{ width: "100%", background: accent, border: "none", borderRadius: 13, padding: "13px", color: "#08090f", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, cursor: "pointer" }}>Download export</button>
+          </div>
+        </div>
+      ) : null}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
 
-export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
+export function LookupPage({ resetKey = 0, onNavigate }: { resetKey?: number; onNavigate?: (page: string) => void } = {}) {
   const { accent } = useAccent();
-  const { team: appTeam } = useApp();
+  const { team: appTeam, favorites, toggleFavorite, isFavorite } = useApp();
   const initialPath = resetKey === 0 && typeof window !== "undefined" ? window.location.pathname : "";
   const pathTeam = initialPath.match(/\/teams\/([^/]+)/)?.[1] ?? "";
   const pathEvent = initialPath.match(/\/events\/([^/]+)/)?.[1] ?? "";
@@ -925,6 +1276,13 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
   const [loading, setLoading] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<RoboTeamResult | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<RoboEvent | null>(null);
+  const [programFilter, setProgramFilter] = useState<ProgramCode>("ALL");
+  const [gradeFilter, setGradeFilter] = useState<GradeLevel>("All");
+
+  function openEventChat(event: RoboEvent) {
+    saveEventChatIntent(event);
+    onNavigate?.("messages");
+  }
 
   useEffect(() => {
     let alive = true;
@@ -932,13 +1290,13 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
     setLoading(Boolean(q && q.length >= 2));
     const timer = setTimeout(async () => {
       if (tab === "teams") {
-        const results = q.length >= 2 ? await searchTeams(q) : appTeam ? [appTeam as RoboTeam] : [];
+        const results = q.length >= 2 ? await searchTeams(q, { program: programFilter, grade: gradeFilter }) : appTeam ? [appTeam as RoboTeam] : [];
         if (alive) setTeamResults(results);
       } else {
         const [robotEventsResults, teamScopedEvents] = q.length >= 2
           ? await Promise.all([
-              searchEvents(q),
-              appTeam ? teamEvents(appTeam.id).then((events) => filterEventsForQuery(events, q)) : Promise.resolve([]),
+              searchEvents(q, { program: programFilter, grade: gradeFilter }),
+              appTeam ? teamEvents(appTeam.id).then((events) => filterEventsForQuery(events, q, { program: programFilter, grade: gradeFilter })) : Promise.resolve([]),
             ])
           : [[], appTeam ? await teamEvents(appTeam.id) : []];
         const seen = new Set<number | string>();
@@ -953,7 +1311,7 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
       if (alive) setLoading(false);
     }, 250);
     return () => { alive = false; clearTimeout(timer); };
-  }, [appTeam, query, tab]);
+  }, [appTeam, gradeFilter, programFilter, query, tab]);
 
   useEffect(() => {
     if (!pathTeam || selectedTeam || !teamResults.length) return;
@@ -979,7 +1337,7 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
   if (selectedEvent) {
     return (
       <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <EventDetail event={selectedEvent} accent={accent} onBack={() => setSelectedEvent(null)} onTeamClick={(t) => { setSelectedEvent(null); setSelectedTeam(t); }} />
+        <EventDetail event={selectedEvent} accent={accent} onBack={() => setSelectedEvent(null)} onTeamClick={(t) => { setSelectedEvent(null); setSelectedTeam(t); }} onOpenEventChat={openEventChat} />
       </div>
     );
   }
@@ -1003,6 +1361,20 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
             </button>
           ))}
         </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+            {PROGRAM_OPTIONS.map((option) => {
+              const active = option.value === programFilter;
+              return <button key={option.value} onClick={() => setProgramFilter(option.value)} style={{ flexShrink: 0, minHeight: 30, padding: "6px 10px", borderRadius: 999, background: active ? `${accent}18` : "rgba(255,255,255,0.04)", border: `1px solid ${active ? accent + "40" : "rgba(255,255,255,0.08)"}`, color: active ? accent : "#8a90aa", fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, cursor: "pointer" }}>{option.label}</button>;
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+            {GRADE_OPTIONS.map((option) => {
+              const active = option === gradeFilter;
+              return <button key={option} onClick={() => setGradeFilter(option)} style={{ flexShrink: 0, minHeight: 30, padding: "6px 10px", borderRadius: 999, background: active ? `${accent}18` : "rgba(255,255,255,0.04)", border: `1px solid ${active ? accent + "40" : "rgba(255,255,255,0.08)"}`, color: active ? accent : "#8a90aa", fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, cursor: "pointer" }}>{option}</button>;
+            })}
+          </div>
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, scrollbarWidth: "none" }}>
@@ -1012,7 +1384,33 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
             {loading ? "SEARCHING ROBOTEVENTS" : "BEST MATCHES FROM ROBOTEVENTS"}
           </p>
         ) : null}
-        {tab === "teams" && teamResults.map((team, index) => <TeamCard key={`${team.number}-${team.id}`} team={team} accent={accent} query={query} index={index} onClick={() => setSelectedTeam(team)} />)}
+        {!query.trim() && favorites.length ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 4 }}>
+            <p style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}><Star size={12} style={{ color: "#f59e0b", fill: "#f59e0b" }} /> FAVORITES</p>
+            {favorites.filter((fav) => fav.kind === tab.slice(0, -1)).slice(0, 6).map((fav: Favorite) => (
+              <button key={fav.id} onClick={() => { if (!fav.payload) return; fav.kind === "team" ? setSelectedTeam(fav.payload as RoboTeamResult) : setSelectedEvent(fav.payload as RoboEvent); }} style={{ width: "100%", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "12px 14px", textAlign: "left", cursor: fav.payload ? "pointer" : "default", display: "flex", alignItems: "center", gap: 10 }}>
+                <Star size={14} style={{ color: "#f59e0b", fill: "#f59e0b", flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13.5, color: "#e8eaf0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fav.label}</p>
+                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#7a80a0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fav.sublabel || [fav.program, fav.grade].filter(Boolean).join(" · ")}</p>
+                </div>
+                <ChevronRight size={14} style={{ color: "rgba(255,255,255,0.2)" }} />
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {tab === "teams" && teamResults.map((team, index) => (
+          <TeamCard
+            key={`${team.number}-${team.id}`}
+            team={team}
+            accent={accent}
+            query={query}
+            index={index}
+            favorite={isFavorite("team", team.number)}
+            onToggleFavorite={() => toggleFavorite({ kind: "team", label: team.number, sublabel: `${team.team_name || team.organization || ""}`, program: team.program?.code, grade: team.grade, payload: team })}
+            onClick={() => setSelectedTeam(team)}
+          />
+        ))}
         {tab === "teams" && !teamResults.length ? (
           <div style={{ textAlign: "center", padding: "48px 24px" }}>
             <Users size={34} style={{ color: "#2a2f48", marginBottom: 12 }} />
@@ -1034,6 +1432,20 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
                   <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#7a80a0" }}>{eventLoc(ev)} · {shortDate(ev.start)}</span>
                 </div>
               </div>
+              <button
+                aria-label={isFavorite("event", ev.sku || ev.name) ? "Remove favorite" : "Add favorite"}
+                onClick={(e) => { e.stopPropagation(); toggleFavorite({ kind: "event", label: ev.sku || ev.name, sublabel: `${ev.name} · ${eventLoc(ev)}`, program: ev.program?.code, grade: ev.grade, payload: ev }); }}
+                style={{ background: "transparent", border: "none", padding: 2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+              >
+                <Star size={15} style={{ color: isFavorite("event", ev.sku || ev.name) ? "#f59e0b" : "rgba(255,255,255,0.18)", fill: isFavorite("event", ev.sku || ev.name) ? "#f59e0b" : "none" }} />
+              </button>
+              <button
+                aria-label="Open event chat"
+                onClick={(e) => { e.stopPropagation(); openEventChat(ev); }}
+                style={{ background: `${accent}12`, border: `1px solid ${accent}28`, borderRadius: 9, width: 30, height: 30, padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+              >
+                <MessageCircle size={14} style={{ color: accent }} />
+              </button>
               <ChevronRight size={16} style={{ color: "rgba(255,255,255,0.2)" }} />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1049,6 +1461,8 @@ export function LookupPage({ resetKey = 0 }: { resetKey?: number } = {}) {
                 <TrendingUp size={11} style={{ color: "#10b981" }} />
                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#b0b4c8" }}>{ev.season?.name ?? "Season TBD"}</span>
               </div>
+              {ev.program?.code ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#b0b4c8" }}>{ev.program.code}</span> : null}
+              {ev.grade ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#b0b4c8" }}>{ev.grade}</span> : null}
             </div>
           </button>
         ))}

@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Search, Star, ChevronRight, ArrowLeft, Plus, X, Camera, Tag, TrendingUp, Shield, Zap, Image } from "lucide-react";
+import { Search, Star, ChevronRight, ArrowLeft, Plus, X, Camera, Tag, TrendingUp, Shield, Zap, Image, Edit3, Trash2, Check } from "lucide-react";
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { useAccent } from "../AccentContext";
 import { useApp, type RoboTeam, type ScoutNote } from "../AppContext";
@@ -95,7 +95,7 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
                 </button>
               </div>
             ) : (
-              <TeamSearch onSelect={setSelectedTeam} selectedId={selectedTeam?.id} />
+              <TeamSearch onSelect={setSelectedTeam} />
             )}
           </div>
 
@@ -190,11 +190,13 @@ function AddNoteSheet({ onClose, onSave, accent }: { onClose: () => void; onSave
 
 export function ScoutPage() {
   const { accent } = useAccent();
-  const { scoutNotes, addScoutNote } = useApp();
+  const { scoutNotes, addScoutNote, updateScoutNote, deleteScoutNote } = useApp();
   const notes = scoutNotes;
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<ScoutNote | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
 
   const filtered = notes.filter(
     (n) =>
@@ -212,12 +214,13 @@ export function ScoutPage() {
   };
 
   if (selected) {
+    const currentSelected = scoutNotes.find((note) => note.id === selected.id) ?? selected;
     const radarData = [
-      { axis: "Auto", val: selected.ratings.autonomous * 20 },
-      { axis: "Driver", val: selected.ratings.driver * 20 },
-      { axis: "Endgame", val: selected.ratings.endgame * 20 },
-      { axis: "Defense", val: selected.ratings.defense * 20 },
-      { axis: "Consist.", val: selected.ratings.consistency * 20 },
+      { axis: "Auto", val: currentSelected.ratings.autonomous * 20 },
+      { axis: "Driver", val: currentSelected.ratings.driver * 20 },
+      { axis: "Endgame", val: currentSelected.ratings.endgame * 20 },
+      { axis: "Defense", val: currentSelected.ratings.defense * 20 },
+      { axis: "Consist.", val: currentSelected.ratings.consistency * 20 },
     ];
 
     return (
@@ -227,22 +230,23 @@ export function ScoutPage() {
             <ArrowLeft size={16} style={{ color: "#e8eaf0" }} />
           </button>
           <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 16, color: "#e8eaf0", flex: 1 }}>Scout Note</p>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>{selected.date}</span>
+          <button onClick={() => { setEditing(true); setDescriptionDraft(currentSelected.description); }} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Edit3 size={14} style={{ color: "#e8eaf0" }} /></button>
+          <button onClick={() => { deleteScoutNote(currentSelected.id); setSelected(null); }} style={{ background: "#ff3b5c18", border: "1px solid #ff3b5c35", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Trash2 size={14} style={{ color: "#ff6b7a" }} /></button>
         </div>
 
         {/* Team header */}
         <div style={{ margin: "0 16px 14px", background: "linear-gradient(135deg, #111320, #12142a)", border: `1px solid ${accent}30`, borderRadius: 18, padding: 18 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
             <div style={{ width: 48, height: 48, borderRadius: 13, background: `${accent}15`, border: `1px solid ${accent}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, fontSize: 13, color: accent }}>{selected.teamId}</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, fontSize: 13, color: accent }}>{currentSelected.teamId}</span>
             </div>
             <div>
-              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color: "#e8eaf0" }}>{selected.teamName}</p>
-              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>{selected.matchLabel ? `${selected.matchLabel} · ` : ""}Avg Rating: {avgRating(selected.ratings)} / 5</p>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 18, color: "#e8eaf0" }}>{currentSelected.teamName}</p>
+              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>{currentSelected.matchLabel ? `${currentSelected.matchLabel} · ` : ""}{currentSelected.date} · Avg Rating: {avgRating(currentSelected.ratings)} / 5</p>
             </div>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {selected.tags.map((tag) => (
+            {currentSelected.tags.map((tag) => (
               <span key={tag} style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: accent, background: `${accent}15`, border: `1px solid ${accent}30`, padding: "4px 10px", borderRadius: 20 }}>{tag}</span>
             ))}
           </div>
@@ -253,7 +257,7 @@ export function ScoutPage() {
           {RATING_FIELDS.map((field, i) => (
             <div key={field.key} style={{ display: "flex", alignItems: "center", padding: "12px 16px", borderBottom: i < RATING_FIELDS.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
               <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 600, fontSize: 13, color: "#e8eaf0", flex: 1 }}>{field.label}</span>
-              <StarRating value={selected.ratings[field.key]} color={accent} />
+              <StarRating value={currentSelected.ratings[field.key]} color={accent} />
             </div>
           ))}
         </div>
@@ -272,11 +276,11 @@ export function ScoutPage() {
         </div>
 
         {/* Images */}
-        {selected.images.length > 0 && (
+        {currentSelected.images.length > 0 && (
           <div style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16 }}>
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", marginBottom: 10 }}>Photos</p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {selected.images.map((img, i) => (
+              {currentSelected.images.map((img, i) => (
                 <img key={i} src={img} alt="" style={{ width: 88, height: 88, borderRadius: 10, objectFit: "cover", border: "1px solid rgba(255,255,255,0.1)" }} />
               ))}
             </div>
@@ -284,20 +288,27 @@ export function ScoutPage() {
         )}
 
         {/* Description */}
-        {selected.matchLabel && (
+        {currentSelected.matchLabel && (
           <div style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16 }}>
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", marginBottom: 8 }}>Match Context</p>
             <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#7a80a0", lineHeight: 1.6 }}>
-              {selected.matchLabel}{selected.eventName ? ` · ${selected.eventName}` : ""}{selected.score ? ` · ${selected.score}` : ""}{selected.opponents?.length ? ` · vs ${selected.opponents.join(", ")}` : ""}
+              {currentSelected.matchLabel}{currentSelected.eventName ? ` · ${currentSelected.eventName}` : ""}{currentSelected.score ? ` · ${currentSelected.score}` : ""}{currentSelected.opponents?.length ? ` · vs ${currentSelected.opponents.join(", ")}` : ""}
             </p>
           </div>
         )}
 
         {/* Description */}
-        {selected.description && (
+        {(currentSelected.description || editing) && (
           <div style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16 }}>
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", marginBottom: 8 }}>Notes</p>
-            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#b0b4c8", lineHeight: 1.65 }}>{selected.description}</p>
+            {editing ? (
+              <>
+                <textarea value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} rows={5} style={{ width: "100%", boxSizing: "border-box", background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px 13px", color: "#e8eaf0", outline: "none", resize: "none", fontFamily: "'Inter', sans-serif", fontSize: 13, lineHeight: 1.5, marginBottom: 10 }} />
+                <button onClick={() => { updateScoutNote(currentSelected.id, { description: descriptionDraft }); setSelected({ ...currentSelected, description: descriptionDraft }); setEditing(false); }} style={{ width: "100%", background: accent, border: "none", borderRadius: 12, padding: "11px", color: "#08090f", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}><Check size={14} /> Save note</button>
+              </>
+            ) : (
+              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#b0b4c8", lineHeight: 1.65 }}>{currentSelected.description}</p>
+            )}
           </div>
         )}
       </div>

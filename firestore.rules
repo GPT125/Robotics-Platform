@@ -1,0 +1,99 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsIncomingUserId() {
+      return signedIn()
+        && request.resource.data.uid == request.auth.uid;
+    }
+
+    function ownsExistingUserId() {
+      return signedIn()
+        && resource.data.uid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow create, read, update, delete: if signedIn()
+        && request.auth.uid == userId;
+    }
+
+    match /favorites/{favoriteId} {
+      allow read, delete: if ownsExistingUserId();
+      allow create: if ownsIncomingUserId();
+      allow update: if ownsExistingUserId() && ownsIncomingUserId();
+    }
+
+    match /scoutNotes/{noteId} {
+      allow read, delete: if ownsExistingUserId();
+      allow create: if ownsIncomingUserId();
+      allow update: if ownsExistingUserId() && ownsIncomingUserId();
+    }
+
+    match /todos/{todoId} {
+      allow read, delete: if ownsExistingUserId();
+      allow create: if ownsIncomingUserId();
+      allow update: if ownsExistingUserId() && ownsIncomingUserId();
+    }
+
+    match /workspaces/{workspaceId} {
+      allow read: if signedIn();
+      allow write: if false;
+
+      match /{document=**} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+    }
+
+    // Tournament chat, memberships, messages, offers, moderation,
+    // and system notifications are written through Callable Functions.
+    match /tournamentChats/{eventId} {
+      allow read: if signedIn();
+      allow write: if false;
+
+      match /{document=**} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+    }
+
+    match /messages/{messageId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /eventMemberships/{membershipId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if signedIn()
+        && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /predictionFeedback/{feedbackId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /robotEventsCache/{cacheId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /eventSettings/{eventId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

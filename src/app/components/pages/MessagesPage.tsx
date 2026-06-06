@@ -1,10 +1,22 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Search, Plus, ArrowLeft, X, Lock, MessageCircle, ImagePlus } from "lucide-react";
+import { Send, Search, Plus, ArrowLeft, X, Lock, MessageCircle, ImagePlus, Users, Clock } from "lucide-react";
 import { useAccent } from "../AccentContext";
 import { useApp, type ChatAttachment, type Conversation } from "../AppContext";
 import { downscaleImage, readFileAsDataUrl } from "../media";
+import { getTournamentChat, joinTournamentChat, sendTournamentMessage, type TournamentChatSnapshot } from "../../../services/firebaseBackend";
 
 const REACTIONS = ["👍", "✅", "⚠️", "🤖", "🏆"];
+const EVENT_CHAT_INTENT_KEY = "matchmind:event-chat-intent";
+
+type EventChatIntent = {
+  id: number | string;
+  name: string;
+  sku?: string;
+  start?: string;
+  end?: string;
+  location?: string;
+  program?: string;
+};
 
 function getInitials(name: string) {
   return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2) || "RL";
@@ -19,6 +31,39 @@ function hashColor(str: string) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
+}
+
+function readEventChatIntent(): EventChatIntent | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(EVENT_CHAT_INTENT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as EventChatIntent;
+    return parsed?.id && parsed?.name ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function eventClosesAt(intent: EventChatIntent | null, chat: TournamentChatSnapshot | null) {
+  if (chat?.closesAt) return new Date(chat.closesAt);
+  if (!intent?.end) return null;
+  const end = new Date(intent.end);
+  if (Number.isNaN(end.getTime())) return null;
+  return new Date(end.getTime() + 12 * 60 * 60 * 1000);
+}
+
+function eventOpensAt(intent: EventChatIntent | null, chat: TournamentChatSnapshot | null) {
+  if (chat?.opensAt) return new Date(chat.opensAt);
+  if (!intent?.start) return null;
+  const start = new Date(intent.start);
+  if (Number.isNaN(start.getTime())) return null;
+  return new Date(start.getTime() - 2 * 24 * 60 * 60 * 1000);
+}
+
+function shortDateTime(date: Date | null) {
+  if (!date || Number.isNaN(date.getTime())) return "TBD";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function AttachmentPreview({ att }: { att: ChatAttachment }) {
@@ -40,12 +85,29 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
   const [newTeam, setNewTeam] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [replyTo, setReplyTo] = useState<{ id: string; name: string; text: string } | null>(null);
+  const [eventIntent, setEventIntent] = useState<EventChatIntent | null>(null);
+  const [showEventJoin, setShowEventJoin] = useState(false);
+  const [eventChat, setEventChat] = useState<TournamentChatSnapshot | null>(null);
+  const [eventChatInput, setEventChatInput] = useState("");
+  const [eventChatStatus, setEventChatStatus] = useState("");
+  const [eventChatBusy, setEventChatBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
+  const closesAt = eventClosesAt(eventIntent, eventChat);
+  const opensAt = eventOpensAt(eventIntent, eventChat);
+  const eventChatEnded = Boolean(closesAt && Date.now() > closesAt.getTime());
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [selected?.messages.length, attachments.length]);
+  }, [selected?.messages.length, attachments.length, eventChat?.messages.length]);
+
+  useEffect(() => {
+    const intent = readEventChatIntent();
+    if (!intent) return;
+    setEventIntent(intent);
+    setShowEventJoin(true);
+    setSelectedId(null);
+  }, []);
 
   async function onFiles(files: FileList | null) {
     if (!files?.length) return;
@@ -77,6 +139,59 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
     setNewTeam("");
   };
 
+  const clearEventChatIntent = () => {
+    window.sessionStorage.removeItem(EVENT_CHAT_INTENT_KEY);
+    setEventIntent(null);
+    setShowEventJoin(false);
+    setEventChat(null);
+    setEventChatInput("");
+    setEventChatStatus("");
+  };
+
+  const handleJoinEventChat = async () => {
+    if (!eventIntent) return;
+    if (!team) {
+      setEventChatStatus("Select your team in Settings before joining tournament chat.");
+      return;
+    }
+    if (eventChatEnded) {
+      setEventChatStatus("This tournament chat has ended and cannot be resumed.");
+      return;
+    }
+    setEventChatBusy(true);
+    setEventChatStatus("Joining event chat...");
+    try {
+      await joinTournamentChat({ eventId: eventIntent.id, displayName: profile?.name || team.number, teamNumber: team.number, program: team.program?.code ?? eventIntent.program });
+      const snapshot = await getTournamentChat(eventIntent.id);
+      setEventChat(snapshot);
+      setShowEventJoin(false);
+      setEventChatStatus("");
+      window.sessionStorage.removeItem(EVENT_CHAT_INTENT_KEY);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not join this tournament chat.";
+      setEventChatStatus(message.includes("ended") || message.includes("closed") ? "This tournament chat has ended and cannot be resumed." : message);
+    } finally {
+      setEventChatBusy(false);
+    }
+  };
+
+  const handleSendEventChat = async () => {
+    if (!eventIntent || !eventChatInput.trim() || eventChatEnded) return;
+    setEventChatBusy(true);
+    setEventChatStatus("Sending...");
+    try {
+      await sendTournamentMessage({ eventId: eventIntent.id, body: eventChatInput.trim() });
+      setEventChatInput("");
+      setEventChat(await getTournamentChat(eventIntent.id));
+      setEventChatStatus("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Message blocked or failed.";
+      setEventChatStatus(message.includes("ended") || message.includes("closed") ? "This tournament chat has ended and cannot be resumed." : message);
+    } finally {
+      setEventChatBusy(false);
+    }
+  };
+
   if (!signedIn || !profile?.email) {
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100dvh", padding: "var(--rl-page-top) 24px var(--rl-page-bottom)", justifyContent: "center", alignItems: "center", gap: 0, boxSizing: "border-box" }}>
@@ -93,6 +208,80 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
         <div style={{ marginTop: 28, display: "flex", alignItems: "center", gap: 6 }}>
           <Lock size={11} style={{ color: "#4a5070" }} />
           <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#4a5070" }}>Workspace-only messaging · no public DMs</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (eventIntent && eventChat) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", paddingBottom: "var(--rl-page-bottom)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "var(--rl-page-top) 14px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(10,11,20,0.95)", backdropFilter: "blur(12px)" }}>
+          <button onClick={clearEventChatIntent} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+            <ArrowLeft size={16} style={{ color: "#e8eaf0" }} />
+          </button>
+          <div style={{ width: 38, height: 38, borderRadius: "50%", background: `linear-gradient(135deg, ${accent}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <MessageCircle size={17} style={{ color: "#fff" }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, color: "#e8eaf0", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{eventIntent.name}</p>
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: eventChatEnded ? "#ff6b7a" : "#10b981", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {eventChatEnded ? "Ended" : "Open"} · closes {shortDateTime(closesAt)}
+            </p>
+          </div>
+        </div>
+
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", gap: 8, overflowX: "auto", scrollbarWidth: "none" }}>
+          <div style={{ flexShrink: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "8px 10px", display: "flex", alignItems: "center", gap: 7 }}>
+            <Users size={13} style={{ color: accent }} />
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#cfd3e6" }}>{eventChat.members.length} joined</span>
+          </div>
+          <div style={{ flexShrink: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "8px 10px", display: "flex", alignItems: "center", gap: 7 }}>
+            <Clock size={13} style={{ color: accent }} />
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#cfd3e6" }}>opens {shortDateTime(opensAt)}</span>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 14px", display: "flex", flexDirection: "column", gap: 10, scrollbarWidth: "none" }}>
+          {eventChatEnded ? (
+            <div style={{ background: "#181c2e", border: "1px solid rgba(255,107,122,0.28)", borderRadius: 15, padding: 14 }}>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13.5, color: "#ff6b7a" }}>This tournament chat has ended.</p>
+              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#9aa0bf", lineHeight: 1.5, marginTop: 4 }}>Messages are locked after the event window closes, and this chat cannot be resumed.</p>
+            </div>
+          ) : null}
+          {eventChat.messages.length ? eventChat.messages.map((msg) => {
+            const own = msg.teamNumber === team?.number && msg.firstName === (profile.name.split(/\s+/)[0] || profile.name);
+            return (
+              <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: own ? "flex-end" : "flex-start" }}>
+                <div style={{ maxWidth: "82%", padding: "10px 14px", borderRadius: own ? "18px 18px 4px 18px" : "18px 18px 18px 4px", background: own ? accent : "#181c2e", border: own ? "none" : "1px solid rgba(255,255,255,0.07)", fontFamily: "'Inter', sans-serif", fontSize: 13, color: own ? "#08090f" : "#e8eaf0", lineHeight: 1.55 }}>
+                  <span style={{ display: "block", fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: own ? "rgba(8,9,15,0.65)" : accent, marginBottom: 4 }}>{msg.firstName} · {msg.teamNumber}</span>
+                  {msg.body}
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "rgba(255,255,255,0.2)", marginTop: 3 }}>{msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+              </div>
+            );
+          }) : (
+            <div style={{ textAlign: "center", padding: "48px 24px" }}>
+              <MessageCircle size={32} style={{ color: "#2a2f48", marginBottom: 12 }} />
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 15, color: "#e8eaf0", marginBottom: 5 }}>No event messages yet</p>
+              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#7a80a0", lineHeight: 1.5 }}>Only first names and team numbers are shown here.</p>
+            </div>
+          )}
+          <div ref={endRef} />
+        </div>
+
+        <div style={{ padding: "8px 14px 10px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          {eventChatStatus ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: eventChatStatus.includes("blocked") || eventChatStatus.includes("ended") || eventChatStatus.includes("failed") ? "#ff6b7a" : "#7a80a0", lineHeight: 1.4, marginBottom: 7 }}>{eventChatStatus}</p> : null}
+          {eventChatEnded ? (
+            <div style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 15, padding: "12px 13px", fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#7a80a0", textAlign: "center" }}>Chat closed automatically.</div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, background: "#181c2e", border: `1px solid ${accent}25`, borderRadius: 16, padding: "8px 8px 8px 12px", alignItems: "center" }}>
+              <input value={eventChatInput} onChange={(e) => setEventChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendEventChat()} placeholder="Message event chat…" style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#e8eaf0" }} />
+              <button onClick={handleSendEventChat} disabled={!eventChatInput.trim() || eventChatBusy} style={{ width: 36, height: 36, borderRadius: 10, background: eventChatInput.trim() && !eventChatBusy ? accent : "rgba(255,255,255,0.06)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: eventChatInput.trim() && !eventChatBusy ? "pointer" : "default", flexShrink: 0, boxShadow: eventChatInput.trim() && !eventChatBusy ? `0 0 12px ${accent}50` : "none" }}>
+                <Send size={15} style={{ color: eventChatInput.trim() && !eventChatBusy ? "#08090f" : "rgba(255,255,255,0.2)" }} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -282,6 +471,44 @@ export function MessagesPage({ onSignIn }: { onSignIn?: () => void }) {
           <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
         </div>
       )}
+      {eventIntent && showEventJoin ? (
+        <div onClick={() => setShowEventJoin(false)} style={{ position: "fixed", inset: 0, zIndex: 220, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box", background: "rgba(0,0,0,0.72)", backdropFilter: "blur(6px)" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 402, background: "#0d0f1c", borderRadius: 22, border: `1px solid ${eventChatEnded ? "#ff6b7a44" : accent + "35"}`, padding: "18px 18px 20px", boxShadow: "0 18px 60px rgba(0,0,0,0.48)", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 14, background: `${eventChatEnded ? "#ff6b7a" : accent}18`, border: `1px solid ${eventChatEnded ? "#ff6b7a" : accent}35`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <MessageCircle size={20} style={{ color: eventChatEnded ? "#ff6b7a" : accent }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: eventChatEnded ? "#ff6b7a" : accent, letterSpacing: "0.08em" }}>EVENT GROUP CHAT</p>
+                <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 19, color: "#fff", margin: "2px 0 0", lineHeight: 1.15 }}>{eventIntent.name}</h3>
+                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#7a80a0", marginTop: 4 }}>{eventIntent.location || eventIntent.sku || "RobotEvents tournament"}</p>
+              </div>
+              <button onClick={clearEventChatIntent} style={{ width: 30, height: 30, borderRadius: 10, background: "rgba(255,255,255,0.06)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}><X size={14} style={{ color: "#9aa0bf" }} /></button>
+            </div>
+            {eventChatEnded ? (
+              <div style={{ background: "#ff6b7a12", border: "1px solid #ff6b7a30", borderRadius: 14, padding: "12px 13px", marginBottom: 14 }}>
+                <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13, color: "#ff6b7a" }}>This tournament chat has ended.</p>
+                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#b0b4c8", lineHeight: 1.5, marginTop: 4 }}>Event chats close 12 hours after the event ends and cannot be resumed.</p>
+              </div>
+            ) : (
+              <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "12px 13px", marginBottom: 14 }}>
+                <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13, color: "#e8eaf0", marginBottom: 6 }}>Before you join</p>
+                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.3, color: "#b0b4c8", lineHeight: 1.55 }}>
+                  Your <strong style={{ color: accent }}>first name</strong> and <strong style={{ color: accent }}>team number</strong> will be visible to other MatchMind users at this tournament. Your email will not be shown.
+                </p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", marginTop: 9 }}>Open {shortDateTime(opensAt)} · closes {shortDateTime(closesAt)}</p>
+              </div>
+            )}
+            {eventChatStatus ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: eventChatStatus.includes("ended") || eventChatStatus.includes("failed") || eventChatStatus.includes("Select") ? "#ff6b7a" : "#9aa0bf", lineHeight: 1.45, marginBottom: 10 }}>{eventChatStatus}</p> : null}
+            <div style={{ display: "grid", gridTemplateColumns: eventChatEnded ? "1fr" : "1fr 1fr", gap: 8 }}>
+              <button onClick={clearEventChatIntent} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 13, padding: "12px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{eventChatEnded ? "Close" : "Cancel"}</button>
+              {!eventChatEnded ? (
+                <button onClick={handleJoinEventChat} disabled={eventChatBusy} style={{ background: eventChatBusy ? "rgba(255,255,255,0.08)" : accent, border: "none", borderRadius: 13, padding: "12px", color: eventChatBusy ? "#5c627e" : "#08090f", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13, cursor: eventChatBusy ? "default" : "pointer", boxShadow: eventChatBusy ? "none" : `0 0 16px ${accent}40` }}>{eventChatBusy ? "Joining..." : "Join Event Chat"}</button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

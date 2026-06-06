@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Sparkles, Loader2, Trophy, Send, Users, ChevronDown } from "lucide-react";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
-import { askCoach, eventMatches, eventRankings, eventSkills, eventTeams, matchAlliances, teamEvents, teamMatches, type RoboEvent, type RoboRanking, type RoboSkills, type RoboMatch, type RoboTeamResult } from "../../../services/api";
+import { allianceCountForTeamCount, askCoach, eventMatches, eventRankings, eventSkills, eventTeams, inviteLikelihood, matchAlliances, teamEvents, teamMatches, type RoboEvent, type RoboRanking, type RoboSkills, type RoboMatch, type RoboTeamResult } from "../../../services/api";
 
 type Msg = { role: "user" | "ai"; text: string };
 
@@ -46,13 +46,6 @@ function historySummary(matches: RoboMatch[], number: string) {
   const wins = scored.filter((s) => s.won).length;
   const avg = scored.length ? Math.round(scored.reduce((sum, s) => sum + s.ours, 0) / scored.length) : null;
   return scored.length ? `${wins}-${scored.length - wins}, ${Math.round((wins / scored.length) * 100)}% win, avg ${avg}` : "no scored history loaded";
-}
-
-function acceptanceOdds(ourRank: number | null, theirRank: number | null) {
-  if (!ourRank || !theirRank || ourRank > 9000 || theirRank > 9000) return 50;
-  const diff = theirRank - ourRank;
-  if (diff < 0) return clamp(54 + diff * 5, 12, 58);
-  return clamp(72 + diff * 1.8, 58, 94);
 }
 
 export function AlliancePage({ onBack }: { onBack: () => void }) {
@@ -146,7 +139,7 @@ export function AlliancePage({ onBack }: { onBack: () => void }) {
         const number = rTeam(r);
         const t = eventTeamList.find((row) => row.number === number) ?? r.team;
         const sk = skillMap.get(number);
-        const accept = acceptanceOdds(ourRankNum, r.rank ?? null);
+        const accept = inviteLikelihood({ ourRank: ourRankNum, candidateRank: r.rank ?? null, teamCount: eventTeamList.length || rankings.length });
         const rankScore = r.rank ? Math.max(0, 100 - r.rank * 2) : 45;
         const skillScore = sk?.score ? Math.min(100, sk.score / 2) : 40;
         const recordScore = ((r.wins ?? 0) * 10) - ((r.losses ?? 0) * 6);
@@ -162,8 +155,8 @@ export function AlliancePage({ onBack }: { onBack: () => void }) {
     return sourceRankings.slice(0, 40).map((r) => {
       const num = rTeam(r);
       const s = sk.get(num);
-      const accept = acceptanceOdds(ourRank?.rank ?? null, r.rank ?? null);
-      return `${num} (rank ${r.rank}, ${r.wins ?? "?"}-${r.losses ?? "?"}, ${r.wp ?? "?"}WP${s ? `, skills ${s.score ?? "?"}` : ""}, acceptance ${accept}%, 3-year history: ${sourceHistories[num] ?? "loading/not available"})`;
+      const accept = inviteLikelihood({ ourRank: ourRank?.rank ?? null, candidateRank: r.rank ?? null, teamCount: eventTeamList.length || sourceRankings.length });
+      return `${num} (rank ${r.rank}, ${r.wins ?? "?"}-${r.losses ?? "?"}, ${r.wp ?? "?"}WP${s ? `, skills ${s.score ?? "?"}` : ""}, invite likelihood ${accept}%, 3-year history: ${sourceHistories[num] ?? "loading/not available"})`;
     }).join("; ");
   }
 
@@ -173,12 +166,13 @@ export function AlliancePage({ onBack }: { onBack: () => void }) {
     setMessages([{ role: "ai", text: "Searching current RobotEvents rankings, skills, match schedule, and recent team history before building the plan…" }]);
     const fresh = await refreshEventData().catch(() => ({ r: rankings, s: skills, teams: eventTeamList, matches: eventMatchList, h: histories }));
     const prompt = `I am team ${team.number} (${team.team_name}). We are at "${selectedEvent.name}".${ourRank ? ` Our current rank is ${ourRank.rank} with ${ourRank.wins ?? "?"}-${ourRank.losses ?? "?"} record.` : ""}
-Here are the teams at this event with official RobotEvents stats, acceptance odds, and recent 3-year summaries where available: ${candidateSummary(fresh.r, fresh.s, fresh.h) || "rankings not posted yet"}.
+Here are the teams at this event with official RobotEvents stats, invite likelihood, and recent 3-year summaries where available: ${candidateSummary(fresh.r, fresh.s, fresh.h) || "rankings not posted yet"}.
 Our current event matches loaded: ${fresh.matches.length}. Our historical match summary: ${team ? historySummary(ourMatches, team.number) : "unknown"}.
+Expected elimination alliance count from current team count ${fresh.teams.length}: ${allianceCountForTeamCount(fresh.teams.length)}.
 
 Act as an expert VEX alliance-selection strategist. Recommend the best alliance partners for us going into elimination selection. Requirements:
 - Rank your TOP 5 picks from best to last-resort.
-- For EACH pick give: the team number, a 1-line reason why they complement us, and an estimated "Acceptance odds" % (how likely they'd accept OUR invite given their rank vs ours — a much higher-ranked team is less likely to accept a lower-ranked team).
+- For EACH pick give: the team number, a 1-line reason why they complement us, and an estimated "Invite likelihood" % (how likely they'd accept OUR invite given their rank vs ours — a much higher-ranked team is less likely to accept a lower-ranked team).
 - Skip teams clearly out of reach or already likely to be alliance captains above us, and say why.
 - End with one short "Strategy" line on who to target first.
 Format with a clear numbered list and bold team numbers. Do not show confidence.`;
@@ -251,8 +245,8 @@ Format with a clear numbered list and bold team numbers. Do not show confidence.
                       <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#b0b4c8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.team?.team_name && row.team.team_name !== row.number ? row.team.team_name : ""}</span>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: accent }}>Partner match {row.score}</span>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#10b981" }}>Accept {row.accept}%</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: accent }}>Match score {row.score}</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#10b981" }}>Invite {row.accept}%</span>
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#f59e0b" }}>Skills {row.skill?.score ?? "—"}</span>
                     </div>
                     <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf", lineHeight: 1.45, marginTop: 6 }}>Partner match blends rank, skills, record, and acceptance odds. Rank #{row.ranking.rank ?? "—"} with {row.ranking.wins ?? 0}-{row.ranking.losses ?? 0} record. {histories[row.number] ? `3-year: ${histories[row.number]}.` : "History loading from RobotEvents."}</p>

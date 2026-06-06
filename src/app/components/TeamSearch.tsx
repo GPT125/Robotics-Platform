@@ -1,10 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, Check, Loader2, MapPin, Sparkles } from "lucide-react";
-import { searchTeams, teamSuggestionReason, type RoboTeamResult } from "../../services/api";
+import { GRADE_OPTIONS, PROGRAM_OPTIONS, searchTeams, teamSuggestionReason, type GradeLevel, type ProgramCode, type RoboTeamResult } from "../../services/api";
 import { useAccent } from "./AccentContext";
 import type { RoboTeam } from "./AppContext";
 
-export function TeamSearch({ onSelect, selectedId }: { onSelect: (team: RoboTeam) => void; selectedId?: number }) {
+export function TeamSearch({
+  onSelect,
+  selectedId,
+  program = "ALL",
+  grade = "All",
+  onProgramChange,
+  onGradeChange,
+  showFilters = true,
+}: {
+  onSelect: (team: RoboTeam) => void;
+  selectedId?: number;
+  program?: ProgramCode;
+  grade?: GradeLevel;
+  onProgramChange?: (program: ProgramCode) => void;
+  onGradeChange?: (grade: GradeLevel) => void;
+  showFilters?: boolean;
+}) {
   const { accent } = useAccent();
   const [q, setQ] = useState("");
   const [results, setResults] = useState<RoboTeamResult[]>([]);
@@ -18,12 +34,12 @@ export function TeamSearch({ onSelect, selectedId }: { onSelect: (team: RoboTeam
     setLoading(true);
     setTouched(true);
     timer.current = setTimeout(async () => {
-      const r = await searchTeams(q);
+      const r = await searchTeams(q, { program, grade });
       setResults(r);
       setLoading(false);
     }, 350);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [q]);
+  }, [grade, program, q]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -37,6 +53,31 @@ export function TeamSearch({ onSelect, selectedId }: { onSelect: (team: RoboTeam
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#e8eaf0", fontFamily: "'Inter', sans-serif", fontSize: 14 }}
         />
       </div>
+
+      {showFilters ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+            {PROGRAM_OPTIONS.map((option) => {
+              const active = option.value === program;
+              return (
+                <button key={option.value} onClick={() => onProgramChange?.(option.value)} style={{ flexShrink: 0, minHeight: 30, padding: "6px 10px", borderRadius: 999, background: active ? `${accent}18` : "rgba(255,255,255,0.04)", border: `1px solid ${active ? accent + "40" : "rgba(255,255,255,0.08)"}`, color: active ? accent : "#8a90aa", fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, cursor: onProgramChange ? "pointer" : "default" }}>
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+            {GRADE_OPTIONS.map((option) => {
+              const active = option === grade;
+              return (
+                <button key={option} onClick={() => onGradeChange?.(option)} style={{ flexShrink: 0, minHeight: 30, padding: "6px 10px", borderRadius: 999, background: active ? `${accent}18` : "rgba(255,255,255,0.04)", border: `1px solid ${active ? accent + "40" : "rgba(255,255,255,0.08)"}`, color: active ? accent : "#8a90aa", fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, cursor: onGradeChange ? "pointer" : "default" }}>
+                  {option}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {q.trim().length >= 2 ? (
         <p style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0", letterSpacing: "0.08em" }}>
@@ -70,6 +111,7 @@ export function TeamSearch({ onSelect, selectedId }: { onSelect: (team: RoboTeam
                     </span>
                   ) : null}
                   {t.program?.code ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#8a90aa" }}>{t.program.code}</span> : null}
+                  {t.grade ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#8a90aa" }}>{t.grade}</span> : null}
                 </div>
               </div>
               {sel ? <Check size={18} style={{ color: accent, flexShrink: 0 }} /> : null}

@@ -2,10 +2,14 @@ node_modules/
 .npm-cache/
 .npm-cache-*/
 dist/
+functions/lib/
+.firebase/
+.playwright-cli/
 .DS_Store
 .env
 .env.local
 .env.*.local
+GoogleService-Info.plist
 coverage/
 playwright-report/
 test-results/

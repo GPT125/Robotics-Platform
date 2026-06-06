@@ -95,6 +95,16 @@ export type AppNotification = {
 };
 
 export type PredictionFeedback = { id: string; matchId: string; predicted: string; actual: string; createdAt: number };
+export type Favorite = {
+  id: string;
+  kind: "team" | "event";
+  label: string;
+  sublabel?: string;
+  program?: string;
+  grade?: string;
+  payload?: unknown;
+  createdAt: number;
+};
 
 type AppState = {
   onboarded: boolean;
@@ -108,6 +118,7 @@ type AppState = {
   conversations: Conversation[];
   notifications: AppNotification[];
   predictionFeedback: PredictionFeedback[];
+  favorites: Favorite[];
 };
 
 type AppCtx = AppState & {
@@ -124,7 +135,10 @@ type AppCtx = AppState & {
   toggleTodo: (id: string) => void;
   deleteTodo: (id: string) => void;
   addScoutNote: (n: Omit<ScoutNote, "id" | "createdAt" | "authorName">) => void;
+  updateScoutNote: (id: string, patch: Partial<Omit<ScoutNote, "id" | "createdAt">>) => void;
   deleteScoutNote: (id: string) => void;
+  toggleFavorite: (favorite: Omit<Favorite, "id" | "createdAt">) => void;
+  isFavorite: (kind: Favorite["kind"], label: string) => boolean;
   addConversation: (c: { name: string; email: string; teamId?: string; type?: Conversation["type"] }) => Conversation;
   sendConversationMessage: (conversationId: string, m: { text: string; attachments?: ChatAttachment[] }) => void;
   toggleMessageReaction: (conversationId: string, messageId: string, reaction: string) => void;
@@ -149,6 +163,7 @@ const initial: AppState = {
   conversations: [],
   notifications: [],
   predictionFeedback: [],
+  favorites: [],
 };
 
 function normalizeTodo(t: Partial<Todo> & { id?: string; title?: string; createdAt?: number }): Todo {
@@ -193,6 +208,7 @@ function load(): AppState {
       conversations: parsed.conversations ?? [],
       notifications: parsed.notifications ?? [],
       predictionFeedback: parsed.predictionFeedback ?? [],
+      favorites: parsed.favorites ?? [],
     };
   } catch {
     return initial;
@@ -226,7 +242,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         notifications: [
           {
             id: uid(),
-            type: "info",
+            type: "info" as const,
             title: "Welcome to MatchMind",
             body: "Your robotics command center is ready. Select your team to unlock live match results, awards, scouting notes, and AI strategy.",
             createdAt: Date.now(),
@@ -243,8 +259,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       profile: s.profile ?? { name: "Guest", email: null, avatar: "MM" },
       notifications: [
         {
-          id: uid(),
-          type: "info",
+            id: uid(),
+            type: "info" as const,
           title: "Welcome to MatchMind",
           body: "Your competition dashboard is ready. Pick a team to unlock live matches, stats, awards, reminders, and AI strategy.",
           createdAt: Date.now(),
@@ -275,7 +291,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...s,
         scoutNotes: [{ ...note, id: uid(), createdAt: Date.now(), authorName: s.profile?.name ?? "Guest" }, ...s.scoutNotes],
       })),
+    updateScoutNote: (id, patch) => setState((s) => ({
+      ...s,
+      scoutNotes: s.scoutNotes.map((note) => note.id === id ? { ...note, ...patch } : note),
+    })),
     deleteScoutNote: (id) => setState((s) => ({ ...s, scoutNotes: s.scoutNotes.filter((n) => n.id !== id) })),
+    toggleFavorite: (favorite) => setState((s) => {
+      const key = `${favorite.kind}:${favorite.label.toLowerCase()}`;
+      const exists = s.favorites.some((item) => `${item.kind}:${item.label.toLowerCase()}` === key);
+      return {
+        ...s,
+        favorites: exists
+          ? s.favorites.filter((item) => `${item.kind}:${item.label.toLowerCase()}` !== key)
+          : [{ ...favorite, id: uid(), createdAt: Date.now() }, ...s.favorites].slice(0, 60),
+      };
+    }),
+    isFavorite: (kind, label) => state.favorites.some((item) => item.kind === kind && item.label.toLowerCase() === label.toLowerCase()),
     addConversation: (c) => {
       const convo: Conversation = {
         id: uid(),

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Trophy, Zap, Target, Clock, TrendingUp, ChevronRight, Star, ListChecks, Plus, WifiOff, MessageCircle, Bell, CheckCircle } from "lucide-react";
+import { Trophy, Zap, Target, Clock, TrendingUp, ChevronRight, Star, ListChecks, Plus, WifiOff, MessageCircle, Bell, CheckCircle, Award, Swords } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
@@ -117,12 +117,26 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
 
   useEffect(() => {
     if (!team || !matches.length) return;
-    const latest = matches.find((m) => matchScore(m, team.number));
-    if (!latest) return;
-    const key = `matchmind:notified:${team.number}:${latest.id}`;
-    if (localStorage.getItem(key)) return;
-    const score = matchScore(latest, team.number);
-    if (!score) return;
+    const scoredMatches = matches
+      .map((match) => ({ match, score: matchScore(match, team.number) }))
+      .filter((row): row is { match: RoboMatch; score: NonNullable<ReturnType<typeof matchScore>> } => Boolean(row.score));
+    if (!scoredMatches.length) return;
+    const signatures = Object.fromEntries(scoredMatches.map(({ match, score }) => [String(match.id), `${score.ours}-${score.theirs}`]));
+    const key = `matchmind:score-signatures:${team.number}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      localStorage.setItem(key, JSON.stringify(signatures));
+      return;
+    }
+    let previous: Record<string, string> = {};
+    try { previous = JSON.parse(raw) as Record<string, string>; } catch { previous = {}; }
+    const changed = scoredMatches
+      .filter(({ match, score }) => previous[String(match.id)] !== `${score.ours}-${score.theirs}`)
+      .sort((a, b) => matchOrderValue(b.match) - matchOrderValue(a.match))[0];
+    localStorage.setItem(key, JSON.stringify(signatures));
+    if (!changed) return;
+    const latest = changed.match;
+    const score = changed.score;
     addNotification({
       type: score.won ? "match_win" : "match_loss",
       title: score.won ? `${team.number} won ${matchLabel(latest)}` : `${team.number} finished ${matchLabel(latest)}`,
@@ -135,15 +149,25 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
 
   useEffect(() => {
     if (!team || !awards.length) return;
-    const latestAward = awards[0];
-    const key = `matchmind:award-notified:${team.number}:${latestAward.id ?? awardTitle(latestAward)}`;
-    if (localStorage.getItem(key)) return;
+    const ids = awards.map((award) => String(award.id ?? `${awardTitle(award)}:${award.event?.id ?? award.event?.name ?? ""}`));
+    const key = `matchmind:award-signatures:${team.number}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      localStorage.setItem(key, JSON.stringify(ids));
+      return;
+    }
+    let previous: string[] = [];
+    try { previous = JSON.parse(raw) as string[]; } catch { previous = []; }
+    const latestId = ids.find((id) => !previous.includes(id));
+    localStorage.setItem(key, JSON.stringify(ids));
+    if (!latestId) return;
+    const latestAward = awards[ids.indexOf(latestId)];
+    if (!latestAward) return;
     addNotification({
       type: "award",
       title: `${team.number} award update`,
       body: `${awardTitle(latestAward)} was posted in official RobotEvents awards${latestAward.event?.name ? ` for ${latestAward.event.name}` : ""}.`,
     });
-    localStorage.setItem(key, "1");
   }, [addNotification, awards, team]);
 
   useEffect(() => {
@@ -188,7 +212,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
   const consistency = scored.length > 1 && avgScore != null
     ? Math.round(Math.sqrt(scored.reduce((sum, row) => sum + Math.pow(row.score.ours - avgScore, 2), 0) / scored.length))
     : null;
-  const sparkRows = scored.slice(0, 12).reverse();
+  const sparkRows = scored.slice().reverse();
   const sparkData = sparkRows.map((row) => ({
     v: row.score.ours,
     label: matchLabel(row.match),
@@ -197,33 +221,25 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
   }));
   const recent = scored.slice(0, 4);
   const nextMatch = team ? seasonMatches.find((m) => !matchScore(m, team.number) && teamSide(m, team.number)) : null;
-  const freshLabel = stale ? "Stale" : loading ? "Updating" : team ? "Fresh" : "Offline";
+  const freshLabel = stale ? "Stale" : loading ? "Updating" : team ? "" : "Offline";
   const visibleNotification = notifications.find((n) => !n.seen) ?? notifications[0];
   const nColor = notificationColor(visibleNotification?.type);
   const visibleEvents = currentSchoolYear ? events.filter((e) => schoolYear(e.start) === currentSchoolYear) : events;
   const visibleEventIds = useMemo(() => new Set(visibleEvents.map((event) => event.id)), [visibleEvents]);
   const visibleAwards = useMemo(() => awards.filter((award) => !currentSchoolYear || !award.event?.id || visibleEventIds.has(award.event.id)), [awards, currentSchoolYear, visibleEventIds]);
   const displayName = (profile?.name || team?.number || "driver").trim().split(/\s+/)[0] || "driver";
-  const thoughtfulLine = useMemo(() => {
-    const lines = [
-      "Review one stat, capture one useful note, and keep the next match simple.",
-      "Your strongest scouting edge is clean data collected right after each match.",
-      "Use today’s results, not old assumptions, when building the next pick list.",
-      "Small fixes compound fast. Check reminders before queueing your next match.",
-    ];
-    return lines[new Date().getMinutes() % lines.length];
-  }, []);
+  const avatarIsImage = profile?.avatar?.startsWith("data:") || profile?.avatar?.startsWith("http");
 
   return (
     <div style={{ padding: "var(--rl-page-top) 16px var(--rl-page-bottom)", display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#7a80a0", letterSpacing: "0.1em" }}>{team ? `TEAM ${team.number}` : "NO TEAM SELECTED"} · {freshLabel.toUpperCase()}</p>
+          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#7a80a0", letterSpacing: "0.1em" }}>{team ? `TEAM ${team.number}` : "NO TEAM SELECTED"}</p>
           <h1 style={{ fontFamily: "'Exo 2', sans-serif", fontSize: 28, fontWeight: 900, color: "#e8eaf0", lineHeight: 1.1, marginTop: 2 }}>MatchMind</h1>
-          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#9aa0bf", lineHeight: 1.4, marginTop: 4 }}>{greetingFor(displayName)} · {thoughtfulLine}</p>
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#9aa0bf", lineHeight: 1.4, marginTop: 4 }}>{greetingFor(displayName)}</p>
         </div>
         <div style={{ width: 44, height: 44, borderRadius: "50%", background: `linear-gradient(135deg, ${accent} 0%, #7c3aed 100%)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 20px ${accent}40`, overflow: "hidden" }}>
-          {profile?.avatar?.startsWith("data:") ? <img src={profile.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <img src="/matchmind-logo.svg" alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+          {avatarIsImage ? <img src={profile?.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, color: "#fff" }}>{profile?.avatar || "MM"}</span>}
         </div>
       </div>
 
@@ -250,28 +266,6 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
         })}
       </div>
 
-      <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13.5, color: "#e8eaf0" }}>Stats Toolkit</p>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#7a80a0" }}>{currentSchoolYear || "current season"}</span>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-          {[
-            { label: "FORM", value: recentForm.length ? `${recentWins}-${recentForm.length - recentWins}` : "—", color: accent },
-            { label: "HIGH", value: maxScore ?? "—", color: "#10b981" },
-            { label: "CONSIST", value: consistency == null ? "—" : `±${consistency}`, color: "#a855f7" },
-            { label: "BEST DIFF", value: bestMargin == null ? "—" : bestMargin > 0 ? `+${bestMargin}` : String(bestMargin), color: "#f59e0b" },
-            { label: "EVENTS", value: visibleEvents.length || "—", color: "#00c8ff" },
-            { label: "OPEN TASKS", value: openTasks || "—", color: "#ff6b2b" },
-          ].map((stat) => (
-            <div key={stat.label} style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 16, color: stat.color }}>{stat.value}</p>
-              <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8.5, color: "#7a80a0", marginTop: 2 }}>{stat.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {!team ? (
         <button onClick={() => onNavigate?.("settings")} style={{ background: "#111320", border: `1px solid ${accent}25`, borderRadius: 16, padding: 16, cursor: "pointer", textAlign: "left" }}>
           <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 15, color: "#e8eaf0" }}>Select a verified team</p>
@@ -285,10 +279,12 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0" }}>Score Trend</p>
             <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>{sparkData.length ? `Last ${sparkData.length} official scored matches` : team ? "No scored matches posted for this school year" : "Select a team to load official match scores"}</p>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, color: stale ? "#ff8c00" : "#10b981" }}>
-            {stale ? <WifiOff size={13} /> : <TrendingUp size={13} />}
-            <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 12 }}>{freshLabel}</span>
-          </div>
+          {freshLabel ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, color: stale ? "#ff8c00" : "#10b981" }}>
+              {stale ? <WifiOff size={13} /> : <TrendingUp size={13} />}
+              <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 12 }}>{freshLabel}</span>
+            </div>
+          ) : null}
         </div>
         {sparkData.length ? (
           <ResponsiveContainer width="100%" height={64}>
@@ -304,10 +300,10 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
                 cursor={{ stroke: "rgba(255,255,255,0.08)" }}
                 contentStyle={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", boxShadow: "0 12px 30px rgba(0,0,0,0.35)" }}
                 itemStyle={{ color: accent }}
-                labelFormatter={(_, payload) => payload?.[0]?.payload ? `${payload[0].payload.label} · ${payload[0].payload.result}` : "Match"}
-                formatter={(v: number, _name, payload) => [`${v} vs ${payload?.payload?.opponent ?? "TBD"}`, "Score"]}
+                labelFormatter={(_label, payload: any[]) => payload?.[0]?.payload ? `${payload[0].payload.label} · ${payload[0].payload.result}` : "Match"}
+                formatter={(v: unknown, _name: unknown, payload: any) => [`${v} vs ${payload?.payload?.opponent ?? "TBD"}`, "Score"]}
               />
-              <Line type="monotone" dataKey="v" stroke="url(#lg)" strokeWidth={2.5} dot={{ r: 2.5, strokeWidth: 0, fill: accent }} activeDot={{ r: 4, strokeWidth: 0, fill: "#fff" }} />
+              <Line type="monotone" dataKey="v" stroke="url(#lg)" strokeWidth={2.5} dot={false} activeDot={{ r: 4, strokeWidth: 0, fill: "#fff" }} />
             </LineChart>
           </ResponsiveContainer>
         ) : (
@@ -419,6 +415,28 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
         <div style={{ flex: 1 }}>
           <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, color: "#e8eaf0" }}>Alliance Selector</p>
           <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf" }}>AI-ranked partners from live event stats</p>
+        </div>
+        <ChevronRight size={16} style={{ color: accent }} />
+      </button>
+
+      <button onClick={() => onNavigate?.("awardRadar")} style={{ background: "#111320", border: `1px solid ${accent}22`, borderRadius: 16, padding: 16, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left" }}>
+        <div style={{ width: 40, height: 40, borderRadius: 12, background: "#f59e0b18", border: "1px solid #f59e0b30", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Award size={20} style={{ color: "#f59e0b" }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, color: "#e8eaf0" }}>Award Radar</p>
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf" }}>Official awards, criteria, and likely contenders</p>
+        </div>
+        <ChevronRight size={16} style={{ color: accent }} />
+      </button>
+
+      <button onClick={() => onNavigate?.("matchupLab")} style={{ background: "#111320", border: `1px solid ${accent}22`, borderRadius: 16, padding: 16, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left" }}>
+        <div style={{ width: 40, height: 40, borderRadius: 12, background: `${accent}18`, border: `1px solid ${accent}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Swords size={20} style={{ color: accent }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, color: "#e8eaf0" }}>Matchup Lab</p>
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf" }}>1v1 or 2v2 AI prediction workspace</p>
         </div>
         <ChevronRight size={16} style={{ color: accent }} />
       </button>

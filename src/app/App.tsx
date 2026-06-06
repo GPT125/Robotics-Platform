@@ -13,6 +13,8 @@ import { MessagesPage } from "./components/pages/MessagesPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { TodoPage } from "./components/pages/TodoPage";
 import { AlliancePage } from "./components/pages/AlliancePage";
+import { AwardRadarPage } from "./components/pages/AwardRadarPage";
+import { MatchupLabPage } from "./components/pages/MatchupLabPage";
 
 function greetingFor(name: string) {
   const hour = new Date().getHours();
@@ -146,16 +148,18 @@ function AppShell() {
 
   const pages: Record<string, React.ReactNode> = {
     home: <HomePage onNavigate={changePage} />,
-    lookup: <LookupPage resetKey={lookupResetKey} />,
+    lookup: <LookupPage resetKey={lookupResetKey} onNavigate={changePage} />,
     coach: <CoachPage />,
     scout: <ScoutPage />,
     messages: <MessagesPage onSignIn={() => setForceOnboarding(true)} />,
     settings: <SettingsPage onSignIn={() => setForceOnboarding(true)} />,
     todos: <TodoPage onBack={() => changePage("home")} />,
     alliance: <AlliancePage onBack={() => changePage("home")} />,
+    awardRadar: <AwardRadarPage onBack={() => changePage("home")} />,
+    matchupLab: <MatchupLabPage onBack={() => changePage("home")} />,
   };
 
-  const isSubPage = activePage === "todos" || activePage === "alliance";
+  const isSubPage = activePage === "todos" || activePage === "alliance" || activePage === "awardRadar" || activePage === "matchupLab";
 
   return (
     <div style={{ minHeight: "100dvh", background: "#05060d", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>

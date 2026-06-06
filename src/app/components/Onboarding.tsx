@@ -1,19 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, ShieldCheck } from "lucide-react";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
 import { useApp, type RoboTeam } from "./AppContext";
 import { useAccent } from "./AccentContext";
 import { TeamSearch } from "./TeamSearch";
-
-const GOOGLE_CLIENT_ID = (import.meta as { env?: Record<string, string> }).env?.VITE_GOOGLE_CLIENT_ID || "";
-
-function decodeJwt(token: string): { name?: string; email?: string; picture?: string } {
-  try {
-    const payload = token.split(".")[1];
-    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-  } catch {
-    return {};
-  }
-}
+import { appleProvider, auth, googleProvider } from "../../lib/firebase";
 
 export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: boolean; onComplete?: () => void }) {
   const { accent } = useAccent();
@@ -21,7 +12,9 @@ export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: bool
   const [step, setStep] = useState<"auth" | "team">("auth");
   const [picked, setPicked] = useState<RoboTeam | null>(team);
   const [emailFallback, setEmailFallback] = useState("");
-  const gbtn = useRef<HTMLDivElement>(null);
+  const [password, setPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState<"google" | "apple" | "email" | null>(null);
+  const [authError, setAuthError] = useState("");
 
   // Decide step
   useEffect(() => {
@@ -30,34 +23,35 @@ export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: bool
     else setStep("auth");
   }, [forceAuth, signedIn, isGuest]);
 
-  // Google Identity Services button
-  useEffect(() => {
-    if (step !== "auth" || !GOOGLE_CLIENT_ID) return;
-    const g = (window as unknown as { google?: any }).google;
-    function render() {
-      const goog = (window as unknown as { google?: any }).google;
-      if (!goog?.accounts?.id || !gbtn.current) return;
-      goog.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: (resp: { credential: string }) => {
-          const info = decodeJwt(resp.credential);
-          if (info.email) signInGoogle({ name: info.name || "", email: info.email, picture: info.picture });
-        },
-      });
-      gbtn.current.innerHTML = "";
-      goog.accounts.id.renderButton(gbtn.current, { theme: "filled_black", size: "large", shape: "pill", text: "continue_with", width: 300 });
+  async function finishAuth(kind: "google" | "apple" | "email") {
+    setAuthError("");
+    setAuthBusy(kind);
+    try {
+      if (kind === "google" || kind === "apple") {
+        const credential = await signInWithPopup(auth, kind === "google" ? googleProvider : appleProvider);
+        const user = credential.user;
+        signInGoogle({ name: user.displayName || user.email?.split("@")[0] || "MatchMind user", email: user.email || "", picture: user.photoURL || undefined });
+      } else {
+        const email = emailFallback.trim();
+        if (!/\S+@\S+\.\S+/.test(email) || password.length < 6) {
+          setAuthError("Enter a valid email and a password with at least 6 characters.");
+          return;
+        }
+        let credential;
+        try {
+          credential = await signInWithEmailAndPassword(auth, email, password);
+        } catch {
+          credential = await createUserWithEmailAndPassword(auth, email, password);
+        }
+        const user = credential.user;
+        signInGoogle({ name: user.displayName || email.split("@")[0], email, picture: user.photoURL || undefined });
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Sign-in failed. Check Firebase Auth settings and try again.");
+    } finally {
+      setAuthBusy(null);
     }
-    if (g?.accounts?.id) { render(); return; }
-    const existing = document.getElementById("gis-script");
-    if (existing) { existing.addEventListener("load", render); return; }
-    const s = document.createElement("script");
-    s.id = "gis-script";
-    s.src = "https://accounts.google.com/gsi/client";
-    s.async = true;
-    s.defer = true;
-    s.onload = render;
-    document.head.appendChild(s);
-  }, [step, signInGoogle]);
+  }
 
   if (onboarded) return null;
 
@@ -72,14 +66,20 @@ export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: bool
             <h2 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 26, color: "#fff", margin: 0, lineHeight: 1.1 }}>Welcome to MatchMind</h2>
             <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: "#9aa0bf", margin: "8px 0 20px", lineHeight: 1.5 }}>Sign in to unlock your team dashboard, AI coach, scouting, and messages.</p>
 
-            <div ref={gbtn} style={{ display: "flex", justifyContent: "center", marginBottom: 10, minHeight: GOOGLE_CLIENT_ID ? 44 : 0 }} />
-
-            {!GOOGLE_CLIENT_ID ? (
-              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                <input value={emailFallback} onChange={(e) => setEmailFallback(e.target.value)} placeholder="you@team.com" style={{ flex: 1, background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px 14px", color: "#e8eaf0", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 14 }} />
-                <button disabled={!/\S+@\S+\.\S+/.test(emailFallback)} onClick={() => signInGoogle({ name: "", email: emailFallback })} style={{ background: accent, border: "none", borderRadius: 12, padding: "0 16px", color: "#08090f", fontWeight: 700, cursor: "pointer", opacity: /\S+@\S+\.\S+/.test(emailFallback) ? 1 : 0.5 }}>Go</button>
+            <div style={{ display: "grid", gap: 9, marginBottom: 10 }}>
+              <button disabled={Boolean(authBusy)} onClick={() => void finishAuth("google")} style={{ width: "100%", background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, padding: "13px", color: "#e8eaf0", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, cursor: authBusy ? "default" : "pointer" }}>
+                {authBusy === "google" ? "Opening Google..." : "Continue with Google"}
+              </button>
+              <button disabled={Boolean(authBusy)} onClick={() => void finishAuth("apple")} style={{ width: "100%", background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, padding: "13px", color: "#e8eaf0", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, cursor: authBusy ? "default" : "pointer" }}>
+                {authBusy === "apple" ? "Opening Apple..." : "Continue with Apple"}
+              </button>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+                <input value={emailFallback} onChange={(e) => setEmailFallback(e.target.value)} placeholder="you@team.com" autoComplete="email" inputMode="email" style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px 14px", color: "#e8eaf0", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 14 }} />
+                <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" autoComplete="current-password" style={{ background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px 14px", color: "#e8eaf0", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 14 }} />
+                <button disabled={Boolean(authBusy)} onClick={() => void finishAuth("email")} style={{ background: accent, border: "none", borderRadius: 12, padding: "12px 16px", color: "#08090f", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, cursor: authBusy ? "default" : "pointer", opacity: authBusy ? 0.65 : 1 }}>{authBusy === "email" ? "Signing in..." : "Sign in / create account"}</button>
               </div>
-            ) : null}
+              {authError ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#ff6b7a", lineHeight: 1.45 }}>{authError}</p> : null}
+            </div>
 
             <button onClick={() => { continueAsGuest(); onComplete?.(); }} style={{ width: "100%", background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: "13px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 600, fontSize: 14, cursor: "pointer" }}>Continue as guest</button>
             <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#5c627e", textAlign: "center", marginTop: 12 }}>Guests can browse, but messages, shared to-dos, and team sync need sign-in.</p>

@@ -52,6 +52,39 @@ export type RoboTeamResult = {
   grade?: string;
 };
 
+export type ProgramCode = "ALL" | "V5RC" | "VRC" | "VIQRC" | "VURC" | "VAIRC" | "VEXU" | string;
+export type GradeLevel = "All" | "Elementary" | "Middle School" | "High School" | "University" | "Blended";
+
+export const PROGRAM_OPTIONS: Array<{ value: ProgramCode; label: string }> = [
+  { value: "ALL", label: "All programs" },
+  { value: "V5RC", label: "V5RC" },
+  { value: "VRC", label: "VRC" },
+  { value: "VIQRC", label: "VIQRC" },
+  { value: "VURC", label: "VURC" },
+  { value: "VEXU", label: "VEX U" },
+  { value: "VAIRC", label: "VAIRC" },
+];
+
+export const GRADE_OPTIONS: GradeLevel[] = ["All", "Elementary", "Middle School", "High School", "University", "Blended"];
+
+export type TeamSearchFilters = {
+  program?: ProgramCode;
+  grade?: GradeLevel;
+  seasonId?: number;
+};
+
+export type EventSearchFilters = TeamSearchFilters & {
+  region?: string;
+};
+
+export type CompetitionRuleSet = {
+  program: ProgramCode;
+  seasonName?: string;
+  defaultFormat: "head_to_head" | "teamwork" | "multi_alliance" | "unknown";
+  expectedTeamsPerAlliance?: number;
+  predictionEnabled: boolean;
+};
+
 function normalized(value?: string | null) {
   return (value ?? "")
     .normalize("NFKD")
@@ -115,7 +148,29 @@ function teamSearchText(team: RoboTeamResult) {
     team.location?.region,
     team.location?.country,
     team.program?.code,
+    team.program?.name,
+    team.grade,
   ].filter(Boolean).join(" "));
+}
+
+function activeProgram(program?: ProgramCode) {
+  const code = (program ?? "ALL").toString().trim().toUpperCase();
+  return code && code !== "ALL" ? code : "";
+}
+
+function activeGrade(grade?: GradeLevel) {
+  const label = (grade ?? "All").toString().trim();
+  return label && label !== "All" ? label : "";
+}
+
+function teamMatchesFilters(team: RoboTeamResult, filters: TeamSearchFilters = {}) {
+  const program = activeProgram(filters.program);
+  const grade = activeGrade(filters.grade);
+  const teamProgram = (team.program?.code ?? team.program?.name ?? "").toString().toUpperCase();
+  if (program && teamProgram && teamProgram !== program) return false;
+  if (program && !teamProgram) return true;
+  if (grade && normalized(team.grade) && normalized(team.grade) !== normalized(grade)) return false;
+  return true;
 }
 
 function teamSearchScore(team: RoboTeamResult, query: string) {
@@ -148,7 +203,6 @@ function teamSearchScore(team: RoboTeamResult, query: string) {
   score += fuzzyTokenScore(name, terms) * 4;
   score += fuzzyTokenScore(organization, terms) * 3;
   score += fuzzyTokenScore(location, terms) * 2;
-  if (score > 0 && program.includes("v5rc")) score += 42;
   if (score > 0 && program.includes(q)) score += 24;
   return score;
 }
@@ -171,10 +225,15 @@ export function teamSuggestionReason(team: RoboTeamResult, query: string) {
 }
 
 // Validate/lookup a team by its exact number via RobotEvents (forces a real team).
-export async function searchTeams(number: string): Promise<RoboTeamResult[]> {
+export async function searchTeams(number: string, filters: TeamSearchFilters = {}): Promise<RoboTeamResult[]> {
   const q = number.trim().toUpperCase();
   if (!q) return [];
+  const program = activeProgram(filters.program);
+  const programParam = program ? `&program%5B%5D=${encodeURIComponent(program)}` : "";
+  const seasonParam = filters.seasonId ? `&season%5B%5D=${encodeURIComponent(String(filters.seasonId))}` : "";
   const attempts = [
+    `/teams?number%5B%5D=${encodeURIComponent(q)}${programParam}${seasonParam}&per_page=100`,
+    `/teams?search=${encodeURIComponent(q)}${programParam}${seasonParam}&per_page=100`,
     `/teams?number%5B%5D=${encodeURIComponent(q)}&per_page=100`,
     `/teams?search=${encodeURIComponent(q)}&per_page=100`,
   ];
@@ -197,11 +256,15 @@ export async function searchTeams(number: string): Promise<RoboTeamResult[]> {
   return merged
     .map((team) => ({ team, score: teamSearchScore(team, q) }))
     .filter(({ score }) => score > 0)
+    .filter(({ team }) => teamMatchesFilters(team, filters))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
-      const programA = a.team.program?.code === "V5RC" ? 1 : 0;
-      const programB = b.team.program?.code === "V5RC" ? 1 : 0;
-      if (programA !== programB) return programB - programA;
+      const selectedProgram = activeProgram(filters.program);
+      if (selectedProgram) {
+        const programA = a.team.program?.code === selectedProgram ? 1 : 0;
+        const programB = b.team.program?.code === selectedProgram ? 1 : 0;
+        if (programA !== programB) return programB - programA;
+      }
       const exactA = compact(a.team.number) === compact(q) ? 1 : 0;
       const exactB = compact(b.team.number) === compact(q) ? 1 : 0;
       if (exactA !== exactB) return exactB - exactA;
@@ -222,6 +285,9 @@ export type RoboEvent = {
   season?: { id: number; name: string };
   location?: { city?: string; region?: string; country?: string };
   level?: string;
+  program?: { code?: string; name?: string };
+  grade?: string;
+  links?: Array<{ title?: string; label?: string; url?: string; type?: string }>;
 };
 
 export type RoboAward = {
@@ -300,6 +366,8 @@ export function eventSearchScore(event: RoboEvent, query: string) {
   const name = normalized(event.name);
   const location = normalized([event.location?.city, event.location?.region, event.location?.country].filter(Boolean).join(" "));
   const season = normalized(event.season?.name);
+  const program = normalized(`${event.program?.code ?? ""} ${event.program?.name ?? ""}`);
+  const grade = normalized(event.grade);
   const text = normalized([
     event.sku,
     event.name,
@@ -307,6 +375,9 @@ export function eventSearchScore(event: RoboEvent, query: string) {
     event.location?.region,
     event.location?.country,
     event.season?.name,
+    event.program?.code,
+    event.program?.name,
+    event.grade,
   ].filter(Boolean).join(" "));
   const terms = queryTerms(query);
   let score = 0;
@@ -319,6 +390,8 @@ export function eventSearchScore(event: RoboEvent, query: string) {
   else if (name.includes(q)) score = Math.max(score, 590);
   if (location.includes(q)) score = Math.max(score, 430);
   if (season.includes(q)) score = Math.max(score, 320);
+  if (program.includes(q)) score = Math.max(score, 300);
+  if (grade.includes(q)) score = Math.max(score, 280);
   if (terms.length && terms.every((term) => text.includes(term))) score = Math.max(score, 340 + terms.length * 24);
 
   score += fuzzyTokenScore(name, terms) * 4;
@@ -330,6 +403,20 @@ export function eventSearchScore(event: RoboEvent, query: string) {
     score += Math.max(0, 52 - Math.round(monthsAway));
   }
   return score;
+}
+
+function eventMatchesFilters(event: RoboEvent, filters: EventSearchFilters = {}) {
+  const program = activeProgram(filters.program);
+  const grade = activeGrade(filters.grade);
+  const eventProgram = (event.program?.code ?? event.program?.name ?? event.sku?.split("-")[0] ?? "").toString().toUpperCase();
+  const eventGrade = normalized(event.grade ?? `${event.name} ${event.level ?? ""} ${event.event_type ?? ""}`);
+  if (program && eventProgram && !eventProgram.includes(program)) return false;
+  if (grade && eventGrade && !eventGrade.includes(normalized(grade))) return false;
+  if (filters.region) {
+    const where = normalized([event.location?.city, event.location?.region, event.location?.country].filter(Boolean).join(" "));
+    if (!where.includes(normalized(filters.region))) return false;
+  }
+  return true;
 }
 
 export function eventSuggestionReason(event: RoboEvent, query: string) {
@@ -349,10 +436,11 @@ export function eventSuggestionReason(event: RoboEvent, query: string) {
   return "RobotEvents tournament";
 }
 
-export function filterEventsForQuery(events: RoboEvent[], query: string): RoboEvent[] {
+export function filterEventsForQuery(events: RoboEvent[], query: string, filters: EventSearchFilters = {}): RoboEvent[] {
   return events
     .map((event) => ({ event, score: eventSearchScore(event, query) }))
     .filter(({ score }) => score > 0)
+    .filter(({ event }) => eventMatchesFilters(event, filters))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       const start = String(b.event.start ?? "").localeCompare(String(a.event.start ?? ""));
@@ -371,13 +459,17 @@ export async function teamEvents(teamId: number): Promise<RoboEvent[]> {
   }
 }
 
-export async function searchEvents(query: string): Promise<RoboEvent[]> {
+export async function searchEvents(query: string, filters: EventSearchFilters = {}): Promise<RoboEvent[]> {
   const q = query.trim();
   if (q.length < 2) return [];
+  const program = activeProgram(filters.program);
+  const programParam = program ? `&program%5B%5D=${encodeURIComponent(program)}` : "";
+  const seasonParam = filters.seasonId ? `&season%5B%5D=${encodeURIComponent(String(filters.seasonId))}` : "";
   const skuPath = `/events?sku%5B%5D=${encodeURIComponent(q)}&per_page=100`;
   const searchPath = `/events?search=${encodeURIComponent(q)}&per_page=100`;
-  const currentSeasonPath = `/events?search=${encodeURIComponent(q)}&season%5B%5D=197&per_page=100`;
-  const attempts = /^RE-/i.test(q) ? [skuPath, searchPath] : [searchPath, currentSeasonPath, skuPath];
+  const filteredSkuPath = `/events?sku%5B%5D=${encodeURIComponent(q)}${programParam}${seasonParam}&per_page=100`;
+  const filteredSearchPath = `/events?search=${encodeURIComponent(q)}${programParam}${seasonParam}&per_page=100`;
+  const attempts = /^RE-/i.test(q) ? [filteredSkuPath, skuPath, filteredSearchPath, searchPath] : [filteredSearchPath, searchPath, filteredSkuPath, skuPath];
   const seen = new Set<number | string>();
   const merged: RoboEvent[] = [];
   for (const path of attempts) {
@@ -394,7 +486,7 @@ export async function searchEvents(query: string): Promise<RoboEvent[]> {
       // Try the next supported RobotEvents query shape.
     }
   }
-  return filterEventsForQuery(merged, q).slice(0, 30);
+  return filterEventsForQuery(merged, q, filters).slice(0, 30);
 }
 
 export async function teamMatches(teamId: number, seasonId?: number): Promise<RoboMatch[]> {
@@ -623,8 +715,74 @@ export function allianceTeams(alliance: RoboAlliance | undefined): RoboTeamResul
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    })
-    .slice(0, 2);
+    });
+}
+
+export function competitionRuleSet(program?: ProgramCode, seasonName?: string): CompetitionRuleSet {
+  const code = activeProgram(program);
+  if (code === "VIQRC") return { program: code, seasonName, defaultFormat: "teamwork", expectedTeamsPerAlliance: 2, predictionEnabled: false };
+  if (code === "VURC" || code === "VEXU" || code === "VAIRC") return { program: code, seasonName, defaultFormat: "multi_alliance", predictionEnabled: true };
+  if (code === "V5RC" || code === "VRC") return { program: code, seasonName, defaultFormat: "head_to_head", expectedTeamsPerAlliance: 2, predictionEnabled: true };
+  return { program: code || "ALL", seasonName, defaultFormat: "unknown", predictionEnabled: true };
+}
+
+export type MatchDisplayAlliance = {
+  key: string;
+  label: string;
+  color?: string;
+  score: number | null;
+  teams: RoboTeamResult[];
+};
+
+export type MatchDisplayModel = {
+  format: "head_to_head" | "teamwork" | "multi_alliance" | "unknown";
+  scored: boolean;
+  canPredict: boolean;
+  teamsPerAlliance: number;
+  alliances: MatchDisplayAlliance[];
+  red?: MatchDisplayAlliance;
+  blue?: MatchDisplayAlliance;
+  redTeams: RoboTeamResult[];
+  blueTeams: RoboTeamResult[];
+};
+
+export function matchDisplayModel(match: RoboMatch, rules: CompetitionRuleSet = competitionRuleSet()): MatchDisplayModel {
+  const rawAlliances = match.alliances ?? [];
+  const alliances = rawAlliances.map((alliance, index) => {
+    const color = String(alliance.color ?? "").toLowerCase();
+    const label = color === "red" ? "Red" : color === "blue" ? "Blue" : color ? color.replace(/\b\w/g, (c) => c.toUpperCase()) : `Group ${index + 1}`;
+    const score = alliance.score == null ? null : Number(alliance.score);
+    return {
+      key: color || `alliance-${index}`,
+      label,
+      color,
+      score: Number.isFinite(score) ? score : null,
+      teams: allianceTeams(alliance),
+    };
+  });
+  const red = alliances.find((a) => a.color === "red") ?? (alliances.length === 2 ? alliances[0] : undefined);
+  const blue = alliances.find((a) => a.color === "blue") ?? (alliances.length === 2 ? alliances[1] : undefined);
+  const hasHeadToHead = Boolean(red && blue && alliances.length >= 2);
+  const format = hasHeadToHead
+    ? "head_to_head"
+    : alliances.length === 1
+      ? "teamwork"
+      : alliances.length > 2
+        ? "multi_alliance"
+        : rules.defaultFormat;
+  const scored = alliances.some((a) => a.score != null) || Boolean(match.scored);
+  const maxTeams = alliances.reduce((max, a) => Math.max(max, a.teams.length), 0);
+  return {
+    format,
+    scored,
+    canPredict: !scored && Boolean(red && blue && hasHeadToHead && red.teams.length > 0 && blue.teams.length > 0),
+    teamsPerAlliance: maxTeams || rules.expectedTeamsPerAlliance || 0,
+    alliances,
+    red,
+    blue,
+    redTeams: red?.teams ?? [],
+    blueTeams: blue?.teams ?? [],
+  };
 }
 
 export function matchLabel(match: RoboMatch): string {
@@ -634,9 +792,32 @@ export function matchLabel(match: RoboMatch): string {
 }
 
 export function matchAlliances(match: RoboMatch) {
+  const model = matchDisplayModel(match);
   const red = match.alliances?.find((a) => a.color === "red") ?? match.alliances?.[0];
   const blue = match.alliances?.find((a) => a.color === "blue") ?? match.alliances?.[1];
-  return { red, blue, redTeams: allianceTeams(red), blueTeams: allianceTeams(blue) };
+  return { red, blue, redTeams: model.redTeams, blueTeams: model.blueTeams };
+}
+
+export function allianceCountForTeamCount(teamCount: number) {
+  if (teamCount >= 32) return 16;
+  if (teamCount >= 24) return 12;
+  if (teamCount >= 16) return 8;
+  return Math.max(0, Math.floor(teamCount / 2));
+}
+
+export function inviteLikelihood(input: { ourRank?: number | null; candidateRank?: number | null; teamCount?: number; candidateAlreadyDeclined?: boolean }) {
+  if (input.candidateAlreadyDeclined) return 0;
+  const ourRank = input.ourRank ?? null;
+  const candidateRank = input.candidateRank ?? null;
+  const allianceCount = allianceCountForTeamCount(input.teamCount ?? 0);
+  if (!ourRank || !candidateRank || ourRank > 999 || candidateRank > 999) return 50;
+  const likelyCaptain = allianceCount > 0 && candidateRank <= allianceCount;
+  const weCaptain = allianceCount > 0 && ourRank <= allianceCount;
+  if (likelyCaptain && candidateRank < ourRank) return Math.max(8, Math.min(42, 18 + (ourRank - candidateRank) * 2));
+  if (!weCaptain && likelyCaptain) return Math.max(5, Math.min(28, 16 - candidateRank));
+  const rankGap = candidateRank - ourRank;
+  if (rankGap >= 0) return Math.max(58, Math.min(94, 66 + rankGap * 1.7));
+  return Math.max(30, Math.min(62, 58 + rankGap * 4));
 }
 
 export async function sendInviteEmail(input: { name: string; email: string; teamNumber?: string; senderName?: string }) {
