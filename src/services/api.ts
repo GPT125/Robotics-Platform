@@ -1,4 +1,4 @@
-// Frontend API client. All secrets stay server-side (see vite.config.ts middleware).
+// Frontend API client. All secrets stay server-side (see vite.config.ts middleware or Firebase Functions).
 
 export type CoachSource = { title: string; url: string; blurb: string };
 export type CoachChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -37,7 +37,8 @@ export async function fetchIntegrationStatus(): Promise<IntegrationStatus[]> {
 
 // Generic RobotEvents proxy passthrough (server attaches the token).
 export async function robotEvents<T = unknown>(pathAndQuery: string): Promise<T> {
-  const response = await fetch(`/api/robotevents${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`);
+  const path = `${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
+  const response = await fetch(`/api/robotevents${path}`);
   if (!response.ok) throw new Error(`RobotEvents request failed (${response.status})`);
   return (await response.json()) as T;
 }
@@ -207,6 +208,77 @@ function teamSearchScore(team: RoboTeamResult, query: string) {
   return score;
 }
 
+const TEAM_CACHE_KEY = "matchmind:team-search-cache:v1";
+const APP_CACHE_KEYS = ["matchmind:app:v1", "robolab:app:v1"];
+
+function teamCacheKey(team: RoboTeamResult) {
+  return `${team.id || ""}:${team.number}`.toUpperCase();
+}
+
+function sanitizeTeam(team: Partial<RoboTeamResult> | null | undefined): RoboTeamResult | null {
+  const number = String(team?.number ?? "").trim().toUpperCase();
+  if (!number) return null;
+  return {
+    id: Number(team?.id ?? 0),
+    number,
+    team_name: String(team?.team_name ?? number),
+    organization: String(team?.organization ?? ""),
+    location: team?.location,
+    program: team?.program,
+    grade: team?.grade,
+  };
+}
+
+function readCachedTeams(): RoboTeamResult[] {
+  if (typeof window === "undefined") return [];
+  const seen = new Set<string>();
+  const out: RoboTeamResult[] = [];
+  const add = (team: Partial<RoboTeamResult> | null | undefined) => {
+    const clean = sanitizeTeam(team);
+    if (!clean) return;
+    const key = teamCacheKey(clean);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(clean);
+  };
+  try {
+    const raw = window.localStorage.getItem(TEAM_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) as Partial<RoboTeamResult>[] : [];
+    if (Array.isArray(parsed)) parsed.forEach(add);
+  } catch {
+    // Ignore local cache issues.
+  }
+  for (const key of APP_CACHE_KEYS) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) as { team?: Partial<RoboTeamResult>; favorites?: Array<{ kind?: string; payload?: unknown }> } : null;
+      add(parsed?.team);
+      parsed?.favorites?.forEach((favorite) => {
+        if (favorite.kind === "team") add(favorite.payload as Partial<RoboTeamResult>);
+      });
+    } catch {
+      // Ignore local app-state cache issues.
+    }
+  }
+  return out;
+}
+
+function rememberTeams(teams: RoboTeamResult[]) {
+  if (typeof window === "undefined" || !teams.length) return;
+  const seen = new Set<string>();
+  const next = [...teams, ...readCachedTeams()]
+    .map(sanitizeTeam)
+    .filter((team): team is RoboTeamResult => Boolean(team))
+    .filter((team) => {
+      const key = teamCacheKey(team);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 250);
+  try { window.localStorage.setItem(TEAM_CACHE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+}
+
 export function teamSuggestionReason(team: RoboTeamResult, query: string) {
   const q = normalized(query);
   const compactQ = compact(query);
@@ -232,8 +304,10 @@ export async function searchTeams(number: string, filters: TeamSearchFilters = {
   const programParam = program ? `&program%5B%5D=${encodeURIComponent(program)}` : "";
   const seasonParam = filters.seasonId ? `&season%5B%5D=${encodeURIComponent(String(filters.seasonId))}` : "";
   const attempts = [
+    `/teams?number=${encodeURIComponent(q)}${programParam}${seasonParam}&per_page=100`,
     `/teams?number%5B%5D=${encodeURIComponent(q)}${programParam}${seasonParam}&per_page=100`,
     `/teams?search=${encodeURIComponent(q)}${programParam}${seasonParam}&per_page=100`,
+    `/teams?number=${encodeURIComponent(q)}&per_page=100`,
     `/teams?number%5B%5D=${encodeURIComponent(q)}&per_page=100`,
     `/teams?search=${encodeURIComponent(q)}&per_page=100`,
   ];
@@ -249,11 +323,19 @@ export async function searchTeams(number: string, filters: TeamSearchFilters = {
         seen.add(key);
         merged.push(team);
       }
+      rememberTeams(json.data);
     } catch {
       // Try the next supported RobotEvents query shape.
     }
   }
-  return merged
+  const cached = readCachedTeams();
+  for (const team of cached) {
+    const key = team.id || team.number;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(team);
+  }
+  const ranked = merged
     .map((team) => ({ team, score: teamSearchScore(team, q) }))
     .filter(({ score }) => score > 0)
     .filter(({ team }) => teamMatchesFilters(team, filters))
@@ -272,6 +354,8 @@ export async function searchTeams(number: string, filters: TeamSearchFilters = {
     })
     .map(({ team }) => team)
     .slice(0, 25);
+  rememberTeams(ranked);
+  return ranked;
 }
 
 export type RoboEvent = {
@@ -528,7 +612,9 @@ export async function teamAwards(teamId: number): Promise<RoboAward[]> {
 export async function eventTeams(eventId: number): Promise<RoboTeamResult[]> {
   try {
     const json = await robotEvents<DataList<RoboTeamResult>>(`/events/${eventId}/teams?per_page=250`);
-    return Array.isArray(json.data) ? json.data : [];
+    const teams = Array.isArray(json.data) ? json.data : [];
+    rememberTeams(teams);
+    return teams;
   } catch {
     return [];
   }

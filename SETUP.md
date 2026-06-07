@@ -23,7 +23,7 @@ npm start          # serves dist/ + /api on $PORT (used by Render)
 | `GROQ_API_KEY` | ✅ working | AI coach (primary) |
 | `OPENROUTER_API_KEY` | ✅ working | AI coach cross-check + image/video vision |
 | `DEEPSEEK_API_KEY` | ⚠️ "Insufficient Balance" | extra cross-check (add credit to enable) |
-| `OPENAI_API_KEY` | ⚠️ "quota exceeded" | extra cross-check + best vision (add billing to enable) |
+| `OPENAI_API_KEY` | ⚠️ "quota exceeded" | extra cross-check, best vision, and AI Coach voice transcription (add billing to enable) |
 | `VITE_FIREBASE_API_KEY` | needed | Firebase web app bootstrap |
 | `VITE_FIREBASE_AUTH_DOMAIN` | needed | Firebase Auth |
 | `VITE_FIREBASE_PROJECT_ID` | needed | Firebase project |
@@ -66,13 +66,14 @@ firebase login
 firebase use vexrobolab
 firebase functions:secrets:set ROBOTEVENTS_API_TOKEN
 firebase functions:secrets:set GROQ_API_KEY
+firebase functions:secrets:set DEEPSEEK_API_KEY
 firebase functions:secrets:set OPENROUTER_API_KEY
 firebase functions:secrets:set OPENAI_API_KEY
 ```
 
 Optional non-secret runtime override in `functions/.env`:
 ```bash
-ROBOTEVENTS_BASE_URL=https://www.robotevents.com/api/v2
+ROBOTEVENTS_BASE_URL=https://events.vex.com/api/v2
 ```
 
 The new callable backend includes:
@@ -81,7 +82,7 @@ The new callable backend includes:
 - server-side message safety moderation
 - MatchMind event-team registration
 - alliance offer send/list
-- AI function placeholder wired for server-side provider secrets
+- AI Coach generation and voice transcription wired through server-side provider secrets
 
 ### 4. Messaging
 Messaging currently works per-device (local) with clean chat bubbles, media upload, search,
@@ -110,7 +111,7 @@ and must only be available inside Firebase Functions.
 ```bash
 npm run build
 npm run build --prefix functions
-firebase deploy --only functions,hosting
+firebase deploy --only functions,firestore:rules,hosting
 ```
 
 Tournament group chats open two days before the event and close twelve hours after the event.

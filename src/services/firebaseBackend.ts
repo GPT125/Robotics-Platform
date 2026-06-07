@@ -51,3 +51,27 @@ export async function sendAllianceOffer(input: { eventId: string | number; fromT
 export async function listAllianceOffers(eventId: string | number, teamNumber: string) {
   return callBackend<{ offers: AllianceOffer[] }>("listAllianceOffers", { eventId, teamNumber });
 }
+
+export async function firebaseRobotEvents<T = unknown>(path: string) {
+  return callBackend<T>("robotEventsProxy", { path });
+}
+
+export type FirebaseCoachMessage = { role: "user" | "assistant"; content: string };
+export type FirebaseCoachResponse = {
+  answer: string;
+  provider: string;
+  model: string | null;
+  confidence: "High" | "Medium" | "Low";
+  sources: Array<{ title: string; url: string; blurb: string }>;
+  models?: string[];
+  hasVision?: boolean;
+  dataSources: string[];
+};
+
+export async function firebaseAskCoach(input: { messages?: FirebaseCoachMessage[]; prompt?: string; context?: string; images?: string[] }) {
+  return callBackend<FirebaseCoachResponse>("askCoach", input);
+}
+
+export async function transcribeVoice(input: { audioBase64: string; mimeType: string }) {
+  return callBackend<{ text: string }>("transcribeVoice", input);
+}

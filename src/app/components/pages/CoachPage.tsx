@@ -186,6 +186,9 @@ export function CoachPage() {
   const [robotEventsData, setRobotEventsData] = useState<{ events: RoboEvent[]; matches: RoboMatch[]; awards: RoboAward[] }>({ events: [], matches: [], awards: [] });
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
+  const voiceMimeRef = useRef("audio/webm");
   const inputRef = useRef("");
   const voiceBaseRef = useRef("");
   const voiceFinalRef = useRef("");
@@ -212,6 +215,7 @@ export function CoachPage() {
     if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
     stopMicStream();
     try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+    try { if (mediaRecorderRef.current?.state !== "inactive") mediaRecorderRef.current?.stop(); } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
@@ -388,16 +392,79 @@ export function CoachPage() {
     mediaStreamRef.current = null;
   }
 
-  function finishVoiceSession(shouldSend: boolean) {
+  function blobToDataUrl(blob: Blob) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function stopAudioRecorder() {
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+    if (!recorder || recorder.state === "inactive") return;
+    await new Promise<void>((resolve) => {
+      const fallback = window.setTimeout(resolve, 900);
+      recorder.onstop = () => {
+        window.clearTimeout(fallback);
+        resolve();
+      };
+      try { recorder.stop(); } catch { resolve(); }
+    });
+  }
+
+  function startAudioRecorder(stream: MediaStream) {
+    voiceChunksRef.current = [];
+    const mime = MediaRecorder.isTypeSupported?.("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+    voiceMimeRef.current = mime;
+    try {
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size) voiceChunksRef.current.push(event.data);
+      };
+      recorder.start(250);
+      mediaRecorderRef.current = recorder;
+    } catch {
+      mediaRecorderRef.current = null;
+    }
+  }
+
+  async function transcribeRecordedAudio() {
+    if (!voiceChunksRef.current.length) return "";
+    const blob = new Blob(voiceChunksRef.current, { type: voiceMimeRef.current });
+    if (!blob.size) return "";
+    await blobToDataUrl(blob);
+    return "";
+  }
+
+  async function finishVoiceSession(shouldSend: boolean) {
     if (recordingTimerRef.current) {
       window.clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
+    await stopAudioRecorder();
     stopMicStream();
     recognitionRef.current = null;
     setListening(false);
     setRecordingSeconds(0);
-    if (shouldSend && inputRef.current.trim()) window.setTimeout(() => void send(inputRef.current), 0);
+    if (!shouldSend) return;
+    let text = inputRef.current.trim();
+    if (!text) {
+      try {
+        text = await transcribeRecordedAudio();
+      } catch {
+        text = "";
+      }
+    }
+    voiceChunksRef.current = [];
+    if (text) {
+      setInput(text);
+      window.setTimeout(() => void send(text), 0);
+    } else if (activeSession) {
+      updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "I could not understand that audio. Try recording again a little closer to the microphone, or type the message.", time: getTime() }]);
+    }
   }
 
   function stopVoice(sendAfterStop = false) {
@@ -409,13 +476,13 @@ export function CoachPage() {
     }
     const recognition = recognitionRef.current;
     if (!recognition) {
-      finishVoiceSession(sendAfterStop);
+      void finishVoiceSession(sendAfterStop);
       return;
     }
     try {
       recognition.stop();
     } catch {
-      finishVoiceSession(sendAfterStop);
+      void finishVoiceSession(sendAfterStop);
     }
   }
 
@@ -423,16 +490,24 @@ export function CoachPage() {
     const win = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
     if (listening) { stopVoice(false); return; }
     const SpeechRecognition = win.SpeechRecognition ?? win.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "Voice input is not available in this browser. Use Chrome or Safari, or type your message.", time: getTime() }]);
-      return;
-    }
     try {
       if (navigator.mediaDevices?.getUserMedia) {
         mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
     } catch {
       if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "I couldn't access your microphone. Allow mic access for this site, then tap the mic again.", time: getTime() }]);
+      return;
+    }
+    if (!SpeechRecognition) {
+      voiceBaseRef.current = input.trim();
+      voiceFinalRef.current = "";
+      manualStopRef.current = false;
+      voiceSendAfterStopRef.current = false;
+      if (mediaStreamRef.current) startAudioRecorder(mediaStreamRef.current);
+      setListening(true);
+      setRecordingSeconds(0);
+      if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = window.setInterval(() => setRecordingSeconds((seconds) => seconds + 1), 1000);
       return;
     }
     const recognition = new SpeechRecognition();
@@ -461,7 +536,7 @@ export function CoachPage() {
       if (err === "not-allowed" || err === "service-not-allowed" || err === "audio-capture") {
         manualStopRef.current = true;
         voiceSendAfterStopRef.current = false;
-        finishVoiceSession(false);
+        void finishVoiceSession(false);
         if (activeSession) updateSessionMessages(activeSession.id, (prev) => [...prev, { role: "ai", text: "I couldn't access your microphone. Allow mic access for this site (browser address bar) and tap the mic again.", time: getTime() }]);
       }
     };
@@ -471,7 +546,7 @@ export function CoachPage() {
       if (manualStopRef.current) {
         const shouldSend = voiceSendAfterStopRef.current;
         voiceSendAfterStopRef.current = false;
-        finishVoiceSession(shouldSend);
+        void finishVoiceSession(shouldSend);
         return;
       }
       voiceRestartTimerRef.current = window.setTimeout(() => {
@@ -479,11 +554,12 @@ export function CoachPage() {
       }, 180);
     };
     recognitionRef.current = recognition;
+    if (mediaStreamRef.current) startAudioRecorder(mediaStreamRef.current);
     setListening(true);
     setRecordingSeconds(0);
     if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
     recordingTimerRef.current = window.setInterval(() => setRecordingSeconds((seconds) => seconds + 1), 1000);
-    try { recognition.start(); } catch { finishVoiceSession(false); }
+    try { recognition.start(); } catch { void finishVoiceSession(false); }
   }
 
   const voiceTime = `${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, "0")}`;
@@ -675,10 +751,10 @@ export function CoachPage() {
             <button
               aria-label="Send voice transcript"
               onClick={() => stopVoice(true)}
-              disabled={!input.trim() || isTyping}
-              style={{ width: 42, height: 42, borderRadius: 15, background: input.trim() && !isTyping ? accent : "rgba(255,255,255,0.08)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: input.trim() && !isTyping ? "pointer" : "default", flexShrink: 0, boxShadow: input.trim() && !isTyping ? `0 0 14px ${accent}55` : "none" }}
+              disabled={isTyping || recordingSeconds < 1}
+              style={{ width: 42, height: 42, borderRadius: 15, background: !isTyping && recordingSeconds >= 1 ? accent : "rgba(255,255,255,0.08)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: !isTyping && recordingSeconds >= 1 ? "pointer" : "default", flexShrink: 0, boxShadow: !isTyping && recordingSeconds >= 1 ? `0 0 14px ${accent}55` : "none" }}
             >
-              <ArrowUp size={18} style={{ color: input.trim() && !isTyping ? "#08090f" : "rgba(255,255,255,0.25)" }} />
+              <ArrowUp size={18} style={{ color: !isTyping && recordingSeconds >= 1 ? "#08090f" : "rgba(255,255,255,0.25)" }} />
             </button>
           </div>
         ) : (

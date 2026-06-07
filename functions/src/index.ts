@@ -8,8 +8,9 @@ initializeApp();
 
 const db = getFirestore();
 const ROBOTEVENTS_API_TOKEN = defineSecret("ROBOTEVENTS_API_TOKEN");
-const ROBOTEVENTS_BASE_URL = defineString("ROBOTEVENTS_BASE_URL", { default: "https://www.robotevents.com/api/v2" });
+const ROBOTEVENTS_BASE_URL = defineString("ROBOTEVENTS_BASE_URL", { default: "https://events.vex.com/api/v2" });
 const GROQ_API_KEY = defineSecret("GROQ_API_KEY");
+const DEEPSEEK_API_KEY = defineSecret("DEEPSEEK_API_KEY");
 const OPENROUTER_API_KEY = defineSecret("OPENROUTER_API_KEY");
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 
@@ -67,12 +68,28 @@ async function robotEvents(path: string) {
   const token = ROBOTEVENTS_API_TOKEN.value() || process.env.ROBOT_EVENTS_API_TOKEN || "";
   if (!token) throw new HttpsError("failed-precondition", "RobotEvents API token is not configured in Firebase Functions secrets.");
   const safePath = path.startsWith("/") ? path : `/${path}`;
-  const response = await fetch(`${ROBOTEVENTS_BASE_URL.value()}${safePath}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-  });
-  const json = await response.json().catch(() => ({}));
-  if (!response.ok) throw new HttpsError("unavailable", `RobotEvents returned ${response.status}.`, json);
-  return json;
+  const bases = Array.from(new Set([
+    ROBOTEVENTS_BASE_URL.value().replace(/\/+$/, ""),
+    "https://events.vex.com/api/v2",
+  ]));
+  let lastStatus = 0;
+  let lastBody: unknown = {};
+  for (const base of bases) {
+    const response = await fetch(`${base}${safePath}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "User-Agent": "MatchMind/0.1 Firebase RobotEvents adapter" },
+    });
+    lastStatus = response.status;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+      lastBody = { message: "RobotEvents returned non-JSON.", contentType };
+      continue;
+    }
+    const json = await response.json().catch(() => ({}));
+    lastBody = json;
+    if (!response.ok) throw new HttpsError("unavailable", `RobotEvents returned ${response.status}.`, json);
+    return json;
+  }
+  throw new HttpsError("unavailable", `RobotEvents returned ${lastStatus || "non-JSON"}.`, lastBody);
 }
 
 function eventDates(event: Record<string, unknown>) {
@@ -137,11 +154,27 @@ export const searchTeams = onCall({ secrets: [ROBOTEVENTS_API_TOKEN] }, async (r
   const data = request.data as { query?: string; program?: ProgramCode; grade?: string; seasonId?: number };
   const query = cleanText(data.query, 80).toUpperCase();
   if (query.length < 2) return { data: [] };
-  const params = new URLSearchParams({ search: query, per_page: "100" });
-  if (data.program && data.program !== "ALL") params.append("program[]", data.program);
-  if (data.seasonId) params.append("season[]", String(data.seasonId));
-  const response = await robotEvents(`/teams?${params.toString()}`);
-  const rows = Array.isArray((response as { data?: unknown[] }).data) ? (response as { data: unknown[] }).data : [];
+  const attempts: string[] = [];
+  const exactParams = new URLSearchParams({ number: query, per_page: "100" });
+  const searchParams = new URLSearchParams({ search: query, per_page: "100" });
+  for (const params of [exactParams, searchParams]) {
+    if (data.program && data.program !== "ALL") params.append("program[]", data.program);
+    if (data.seasonId) params.append("season[]", String(data.seasonId));
+    attempts.push(`/teams?${params.toString()}`);
+  }
+  const seen = new Set<string>();
+  const rows: unknown[] = [];
+  for (const path of attempts) {
+    const response = await robotEvents(path);
+    const dataRows = Array.isArray((response as { data?: unknown[] }).data) ? (response as { data: unknown[] }).data : [];
+    for (const row of dataRows) {
+      const record = row as { id?: number | string; number?: string };
+      const key = String(record.id ?? record.number ?? JSON.stringify(row));
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+  }
   return { data: rows };
 });
 
@@ -303,14 +336,142 @@ export const listAllianceOffers = onCall(async (request) => {
   };
 });
 
-export const askCoach = onCall({ secrets: [GROQ_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY] }, async (request) => {
+type CoachMessage = { role: "system" | "user" | "assistant"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> };
+
+const COACH_SYSTEM = [
+  "You are MatchMind AI, a concise VEX robotics competition coach inside a mobile scouting app.",
+  "Use official RobotEvents context, saved scouting notes, and user-provided media when available.",
+  "Never invent team facts, awards, rankings, scores, or upcoming events. If data is missing, say so clearly.",
+  "Give student-friendly answers with short headings and bullets. Avoid emojis unless the user asks for them.",
+].join(" ");
+
+function dataText(value: unknown, max = 4000) {
+  return cleanText(value, max);
+}
+
+async function callAiProvider(args: { provider: string; url: string; key: string; model: string; messages: CoachMessage[]; extraHeaders?: Record<string, string> }) {
+  const response = await fetch(args.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${args.key}`,
+      ...args.extraHeaders,
+    },
+    body: JSON.stringify({
+      model: args.model,
+      messages: args.messages,
+      temperature: 0.2,
+      max_tokens: 850,
+    }),
+  });
+  const json = await response.json().catch(() => ({})) as { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } };
+  if (!response.ok) throw new Error(json.error?.message ?? `${args.provider} returned ${response.status}`);
+  return dataText(json.choices?.[0]?.message?.content, 8000);
+}
+
+function offlineCoachAnswer(prompt: string, context: string) {
+  const lower = `${prompt} ${context}`.toLowerCase();
+  const checks = [
+    lower.includes("match") ? "Use the latest scored matches first: compare average score, recent win/loss form, partner/opponent strength, and scout notes." : "",
+    lower.includes("alliance") || lower.includes("pick") ? "For alliance selection, weigh tournament rank, invite likelihood, OPR/DPR/CCWM, skills, reliability notes, and role fit." : "",
+    lower.includes("auton") ? "For autonomous, review start position consistency, sensor calibration, motor direction, and one repeatable route before adding complexity." : "",
+    lower.includes("robot") || lower.includes("intake") || lower.includes("drivetrain") ? "For robot issues, inspect wiring, loose hardware, wheel alignment, chain/belt tension, and motor configuration before changing code." : "",
+  ].filter(Boolean);
+  return [
+    "## MatchMind check",
+    checks.length ? checks.map((item) => `- ${item}`).join("\n") : "- I need a team, event, match, robot subsystem, or scout note to give a grounded recommendation.",
+    "- If official RobotEvents data is missing, collect one scout note after the next match and retry the analysis.",
+    "",
+    "Confidence: Low — no live AI provider responded, so this is a deterministic MatchMind checklist.",
+  ].join("\n");
+}
+
+export const askCoach = onCall({ secrets: [GROQ_API_KEY, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY] }, async (request) => {
   requireAuth(request.auth?.uid);
-  const prompt = cleanText((request.data as { prompt?: string })?.prompt, 8000);
-  if (!prompt) throw new HttpsError("invalid-argument", "Prompt is required.");
-  const key = GROQ_API_KEY.value() || OPENROUTER_API_KEY.value() || OPENAI_API_KEY.value();
-  if (!key) throw new HttpsError("failed-precondition", "No AI provider secret is configured.");
+  const data = request.data as { prompt?: string; messages?: Array<{ role?: string; content?: string }>; context?: string; images?: string[] };
+  const context = dataText(data.context, 5000);
+  const history = Array.isArray(data.messages)
+    ? data.messages
+      .map((message) => ({
+        role: message.role === "assistant" ? "assistant" as const : "user" as const,
+        content: dataText(message.content, 4000),
+      }))
+      .filter((message) => message.content)
+      .slice(-8)
+    : [];
+  const prompt = dataText(data.prompt || history[history.length - 1]?.content, 8000);
+  if (!prompt && !history.length) throw new HttpsError("invalid-argument", "Prompt is required.");
+  const images = Array.isArray(data.images) ? data.images.filter((image) => typeof image === "string" && image.startsWith("data:")).slice(0, 6) : [];
+  const messages: CoachMessage[] = [
+    { role: "system", content: COACH_SYSTEM },
+    ...(context ? [{ role: "system" as const, content: `LIVE MATCHMIND CONTEXT:\n${context}` }] : []),
+    ...history,
+  ];
+  if (!history.length && prompt) messages.push({ role: "user", content: prompt });
+  if (images.length) {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === "user") {
+        const existingContent = messages[i].content;
+        const text = typeof existingContent === "string" ? existingContent : prompt || "Analyze this robot media.";
+        messages[i] = {
+          role: "user",
+          content: [
+            { type: "text", text },
+            ...images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+          ],
+        };
+        break;
+      }
+    }
+  }
+  const providers = [
+    { provider: "Groq", url: "https://api.groq.com/openai/v1/chat/completions", key: GROQ_API_KEY.value(), model: "llama-3.3-70b-versatile" },
+    { provider: "DeepSeek", url: "https://api.deepseek.com/chat/completions", key: DEEPSEEK_API_KEY.value(), model: "deepseek-chat" },
+    { provider: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions", key: OPENROUTER_API_KEY.value(), model: "openai/gpt-4o-mini", extraHeaders: { "HTTP-Referer": "https://matchmind.web.app", "X-Title": "MatchMind VEX Platform" } },
+    { provider: "OpenAI", url: "https://api.openai.com/v1/chat/completions", key: OPENAI_API_KEY.value(), model: images.length ? "gpt-4o-mini" : "gpt-4o-mini" },
+  ].filter((provider) => provider.key);
+  const drafts = await Promise.allSettled(providers.map((provider) => callAiProvider({ ...provider, messages })));
+  const first = drafts.find((draft): draft is PromiseFulfilledResult<string> => draft.status === "fulfilled" && Boolean(draft.value));
+  const answer = first?.value || offlineCoachAnswer(prompt, context);
+  const used = drafts
+    .map((draft, index) => draft.status === "fulfilled" && draft.value ? providers[index]?.provider : "")
+    .filter(Boolean);
   return {
-    answer: "MatchMind AI backend is connected. Use the deployed provider adapter to generate grounded scouting, alliance, and tournament chat summaries.",
-    dataSources: ["Firestore workspace data", "RobotEvents cache"],
+    answer,
+    provider: used[0] ?? "MatchMind offline",
+    model: null,
+    confidence: used.length ? "Medium" : "Low",
+    sources: [],
+    models: used,
+    hasVision: images.length > 0,
+    dataSources: [
+      context ? "Live MatchMind context" : "User prompt",
+      images.length ? "Robot image/video frames" : "Text reasoning",
+      "Firebase Functions server-side AI provider",
+    ],
   };
+});
+
+export const transcribeVoice = onCall({ secrets: [OPENAI_API_KEY] }, async (request) => {
+  requireAuth(request.auth?.uid);
+  const data = request.data as { audioBase64?: string; mimeType?: string };
+  const audioBase64 = cleanText(data.audioBase64, 8_000_000);
+  const mimeType = cleanText(data.mimeType, 80) || "audio/webm";
+  const key = OPENAI_API_KEY.value();
+  if (!key) throw new HttpsError("failed-precondition", "OPENAI_API_KEY is required for voice transcription.");
+  if (!audioBase64) throw new HttpsError("invalid-argument", "Audio is required.");
+  const binary = Buffer.from(audioBase64.replace(/^data:[^,]+,/, ""), "base64");
+  const FormDataCtor = (globalThis as unknown as { FormData: new () => { append: (name: string, value: unknown, filename?: string) => void } }).FormData;
+  const BlobCtor = (globalThis as unknown as { Blob: new (parts: unknown[], options?: { type?: string }) => unknown }).Blob;
+  const form = new FormDataCtor();
+  form.append("model", "gpt-4o-mini-transcribe");
+  form.append("file", new BlobCtor([binary], { type: mimeType }), mimeType.includes("mp4") ? "voice.mp4" : "voice.webm");
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}` },
+    body: form as never,
+  });
+  const json = await response.json().catch(() => ({})) as { text?: string; error?: { message?: string } };
+  if (!response.ok) throw new HttpsError("unavailable", json.error?.message ?? `Transcription returned ${response.status}.`);
+  return { text: cleanText(json.text, 8000) };
 });
