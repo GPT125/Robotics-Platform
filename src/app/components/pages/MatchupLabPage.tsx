@@ -52,10 +52,15 @@ export function MatchupLabPage({ onBack }: { onBack: () => void }) {
     }
   }
 
+  // A real 2v2 needs two teams on EACH side; 1v1 needs one. The prediction only
+  // appears once both alliances are actually full and their stats have loaded —
+  // so a "2v2" never resolves with a lone robot facing a full alliance.
+  const needed = mode === "2v2" ? 2 : 1;
+
   const prediction = useMemo(() => {
     const redRows = red.map((team) => stats[team.number]).filter(Boolean);
     const blueRows = blue.map((team) => stats[team.number]).filter(Boolean);
-    if (!redRows.length || !blueRows.length) return null;
+    if (redRows.length < needed || blueRows.length < needed) return null;
     const redScore = redRows.reduce((sum, row) => sum + row.score, 0) / redRows.length;
     const blueScore = blueRows.reduce((sum, row) => sum + row.score, 0) / blueRows.length;
     const total = Math.max(1, redScore + blueScore);
@@ -63,7 +68,7 @@ export function MatchupLabPage({ onBack }: { onBack: () => void }) {
     const blueProb = 100 - redProb;
     const margin = Math.round(Math.abs(redRows.reduce((sum, row) => sum + row.avg, 0) - blueRows.reduce((sum, row) => sum + row.avg, 0)) || Math.abs(redScore - blueScore) / 3);
     return { redProb, blueProb, winner: redProb >= blueProb ? "Red" : "Blue", margin };
-  }, [blue, red, stats]);
+  }, [blue, red, stats, needed]);
 
   function TeamPill({ team, side }: { team: RoboTeam; side: "red" | "blue" }) {
     const row = stats[team.number];
@@ -111,14 +116,21 @@ export function MatchupLabPage({ onBack }: { onBack: () => void }) {
               <BrainCircuit size={16} style={{ color: accent }} />
               <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 15, color: "#e8eaf0" }}>{prediction.winner} projected by {prediction.margin || "a close"} points</p>
             </div>
-            <div style={{ height: 10, background: "#00c8ff22", borderRadius: 999, overflow: "hidden", marginBottom: 8 }}>
-              <div style={{ width: `${prediction.redProb}%`, height: "100%", background: "#ff3b5c" }} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+              <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 12, color: "#ff6b7a" }}>RED {prediction.redProb}%</span>
+              <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 12, color: "#60d0ff" }}>{prediction.blueProb}% BLUE</span>
             </div>
-            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#9aa0bf" }}>Red {prediction.redProb}% · Blue {prediction.blueProb}%</p>
+            <div style={{ position: "relative", height: 10, background: "rgba(255,255,255,0.06)", borderRadius: 999, overflow: "hidden", marginBottom: 8 }}>
+              <div style={{ position: "absolute", inset: 0, display: "flex" }}>
+                <div style={{ width: `${prediction.redProb}%`, background: "linear-gradient(90deg,#ff3b5c,#ff3b5c90)", transition: "width 0.8s cubic-bezier(0.22,1,0.36,1)" }} />
+                <div style={{ flex: 1, background: "linear-gradient(90deg,#00a3ff90,#00c8ff)", transition: "width 0.8s cubic-bezier(0.22,1,0.36,1)" }} />
+              </div>
+              <div style={{ position: "absolute", top: 0, bottom: 0, left: `${prediction.redProb}%`, width: 2, background: "#0c0e18", transform: "translateX(-1px)" }} />
+            </div>
             <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#b0b4c8", lineHeight: 1.55, marginTop: 8 }}>Prediction uses official recent scored matches, average score, high score, and recent form. If a team has limited posted matches, confidence should be treated as low.</p>
           </div>
         ) : (
-          <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 16, color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 12 }}>{loading ? "Loading team stats..." : "Pick teams on both sides to generate a matchup prediction."}</div>
+          <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 16, color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 12 }}>{loading ? "Loading team stats..." : mode === "2v2" ? `Add ${needed} teams to each alliance for a 2v2 matchup — Red has ${red.length}/${needed}, Blue has ${blue.length}/${needed}.` : "Pick a team on each side to generate a 1v1 matchup prediction."}</div>
         )}
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
