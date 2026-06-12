@@ -1265,10 +1265,31 @@ export function LookupPage({ resetKey = 0, onNavigate }: { resetKey?: number; on
   const [selectedEvent, setSelectedEvent] = useState<RoboEvent | null>(null);
   const [programFilter, setProgramFilter] = useState<ProgramCode>("ALL");
   const [gradeFilter, setGradeFilter] = useState<GradeLevel>("All");
+  // Tournament date filter — so you can narrow by when an event happens even
+  // when you don't remember the exact date.
+  const [dateWindow, setDateWindow] = useState<"all" | "upcoming" | "month" | "past">("all");
 
+  const visibleEvents = useMemo(() => {
+    if (dateWindow === "all") return eventResults;
+    const now = Date.now();
+    const monthAhead = now + 31 * 24 * 60 * 60 * 1000;
+    return eventResults.filter((ev) => {
+      const start = ev.start ? new Date(ev.start).getTime() : NaN;
+      const end = ev.end ? new Date(ev.end).getTime() : start;
+      if (Number.isNaN(start)) return true; // keep undated events visible rather than hide real results
+      if (dateWindow === "upcoming") return end >= now;
+      if (dateWindow === "past") return end < now;
+      if (dateWindow === "month") return start >= now && start <= monthAhead;
+      return true;
+    });
+  }, [eventResults, dateWindow]);
+
+  // The messages page was removed, so the tournament group chat now lives
+  // inside the event detail. Opening "event chat" just opens that event and
+  // flags it so the detail view scrolls to the chat section.
   function openEventChat(event: RoboEvent) {
     saveEventChatIntent(event);
-    onNavigate?.("messages");
+    setSelectedEvent(event);
   }
 
   useEffect(() => {
@@ -1361,6 +1382,14 @@ export function LookupPage({ resetKey = 0, onNavigate }: { resetKey?: number; on
               return <button key={option} onClick={() => setGradeFilter(option)} style={{ flexShrink: 0, minHeight: 30, padding: "6px 10px", borderRadius: 999, background: active ? `${accent}18` : "rgba(255,255,255,0.04)", border: `1px solid ${active ? accent + "40" : "rgba(255,255,255,0.08)"}`, color: active ? accent : "#8a90aa", fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, cursor: "pointer" }}>{option}</button>;
             })}
           </div>
+          {tab === "events" ? (
+            <div style={{ display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
+              {([["all", "All dates"], ["upcoming", "Upcoming"], ["month", "Next 30 days"], ["past", "Past"]] as const).map(([value, label]) => {
+                const active = value === dateWindow;
+                return <button key={value} onClick={() => setDateWindow(value)} style={{ flexShrink: 0, minHeight: 30, padding: "6px 10px", borderRadius: 999, background: active ? `${accent}18` : "rgba(255,255,255,0.04)", border: `1px solid ${active ? accent + "40" : "rgba(255,255,255,0.08)"}`, color: active ? accent : "#8a90aa", fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, cursor: "pointer" }}>{label}</button>;
+              })}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1406,7 +1435,7 @@ export function LookupPage({ resetKey = 0, onNavigate }: { resetKey?: number; on
           </div>
         ) : null}
 
-        {tab === "events" && eventResults.map((ev, index) => (
+        {tab === "events" && visibleEvents.map((ev, index) => (
           <button className="lookupResultCard" key={ev.id} onClick={() => setSelectedEvent(ev)} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "15px 16px", textAlign: "left", cursor: "pointer", width: "100%", animation: "lookupResultIn 0.3s cubic-bezier(0.22,1,0.36,1) both", animationDelay: `${Math.min(index * 35, 180)}ms`, transition: "transform 0.18s ease, border-color 0.18s ease, background 0.18s ease" }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
               <div style={{ width: 44, height: 44, borderRadius: 12, background: "#ff8c0015", border: "1px solid #ff8c0030", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -1453,7 +1482,7 @@ export function LookupPage({ resetKey = 0, onNavigate }: { resetKey?: number; on
             </div>
           </button>
         ))}
-        {tab === "events" && !eventResults.length ? (
+        {tab === "events" && !visibleEvents.length ? (
           <div style={{ textAlign: "center", padding: "48px 24px" }}>
             <Award size={34} style={{ color: "#2a2f48", marginBottom: 12 }} />
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 16, color: "#e8eaf0", marginBottom: 6 }}>Search a tournament</p>

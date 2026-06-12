@@ -44,7 +44,7 @@ function sid() {
 function starterMessage(): Message {
   return {
     role: "ai",
-    text: "Hey! I'm **MatchMind AI**. Ask me anything — strategy, autonomous, driver skills, alliance picks, or robot fixes. You can also attach a **photo or video** of your robot and I'll tell you what to improve. 🤖",
+    text: "Hey! I'm **MatchMind AI**. Ask me anything — strategy, autonomous, driver skills, alliance picks, or robot fixes. You can also attach a **photo or video** of your robot and I'll tell you what to improve.",
     time: getTime(),
   };
 }

@@ -269,11 +269,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ...s.notifications,
         ].slice(0, 20),
       })),
+    // Guests still walk the full popup flow (name -> role -> language -> team
+    // -> legal); `onboarded` is only set true at the end of the legal step, so
+    // we must NOT mark them onboarded here or the flow would be skipped.
     continueAsGuest: () => setState((s) => ({
       ...s,
       isGuest: true,
       signedIn: false,
-      onboarded: true,
       profile: s.profile ?? { name: "Guest", email: null, avatar: "MM" },
       notifications: [
         {
