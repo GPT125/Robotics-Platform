@@ -1,12 +1,46 @@
-import { useRef, useState } from "react";
-import { Bell, Wifi, Shield, LogOut, Info, CheckCircle, Upload, UserPlus, Trash2, Pencil, Check, X, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bell, Wifi, Shield, LogOut, Info, CheckCircle, Upload, UserPlus, Trash2, Pencil, Check, X, ChevronRight, Globe, Plus, ArrowUp } from "lucide-react";
 import { useAccent, ACCENT_COLORS } from "../AccentContext";
-import { useApp, type RoboTeam } from "../AppContext";
+import { useApp, type RoboTeam, type UserRole } from "../AppContext";
 import { TeamSearch } from "../TeamSearch";
 import { readFileAsDataUrl, downscaleImage } from "../media";
 import { sendInviteEmail } from "../../../services/api";
+import { LANGUAGES } from "../../../services/i18n";
 
 const PRESET_AVATARS = ["🤖", "⚙️", "🦾", "🔧", "⚡", "🏆", "🚀", "🎯", "🛠️", "🔩", "🧠", "🦿"];
+
+const TEAM_LIMIT: Record<UserRole, number> = { student: 1, parent: 3, coach: 8 };
+const ROLE_LABEL: Record<UserRole, string> = { student: "Student", coach: "Coach", parent: "Parent" };
+
+const LEGAL_DOCS: Record<string, { title: string; file: string }> = {
+  terms: { title: "Terms of Service", file: "/legal/TERMS_OF_SERVICE.md" },
+  privacy: { title: "Privacy Policy", file: "/legal/PRIVACY_POLICY.md" },
+  handbook: { title: "Community Guidelines & Handbook", file: "/legal/COMMUNITY_GUIDELINES.md" },
+};
+
+function LegalDocModal({ docKey, accent, onClose }: { docKey: string; accent: string; onClose: () => void }) {
+  const doc = LEGAL_DOCS[docKey];
+  const [text, setText] = useState("Loading…");
+  useEffect(() => {
+    let alive = true;
+    fetch(doc.file).then((r) => r.text()).then((body) => { if (alive) setText(body); }).catch(() => { if (alive) setText("Could not load the document right now."); });
+    return () => { alive = false; };
+  }, [doc.file]);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(5,6,13,0.85)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, maxHeight: "82dvh", background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, display: "flex", flexDirection: "column", overflow: "hidden", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+          <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 17, color: "#fff", margin: 0 }}>{doc.title}</h3>
+          <button onClick={onClose} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
+        </div>
+        <div style={{ overflowY: "auto", padding: "14px 18px", fontFamily: "'Inter', sans-serif", fontSize: 12.5, lineHeight: 1.65, color: "#c9cee0", whiteSpace: "pre-wrap" }}>
+          {text.replace(/^#+\s?/gm, "").replace(/\*\*/g, "")}
+        </div>
+      </div>
+      <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
+    </div>
+  );
+}
 
 interface ToggleProps { value: boolean; onChange: (v: boolean) => void; accent: string; }
 function Toggle({ value, onChange, accent }: ToggleProps) {
@@ -71,19 +105,31 @@ function SectionDivider() {
 
 export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
   const { accent, setAccent } = useAccent();
-  const { profile, team, teammates, signedIn, isGuest, setTeam, updateProfile, addTeammate, removeTeammate, signOut, setOnboarded } = useApp();
+  const { profile, team, teams, role, language, teammates, signedIn, isGuest, setTeam, setTeams, setRole, setLanguage, updateProfile, addTeammate, removeTeammate, signOut, setOnboarded } = useApp();
   const [notifications, setNotifications] = useState(true);
   const [matchAlerts, setMatchAlerts] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
   const [dataSharing, setDataSharing] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showAvatar, setShowAvatar] = useState(false);
+  const [showLanguages, setShowLanguages] = useState(false);
+  const [legalDoc, setLegalDoc] = useState<string | null>(null);
   const [editName, setEditName] = useState(false);
   const [nameDraft, setNameDraft] = useState(profile?.name ?? "");
   const [mate, setMate] = useState({ name: "", email: "" });
   const [notice, setNotice] = useState<string | null>(null);
   const [inviteBusy, setInviteBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const teamLimit = role ? TEAM_LIMIT[role] : 1;
+  const myTeams = teams.length ? teams : team ? [team] : [];
+  const currentLang = LANGUAGES.find((l) => l.code === language) ?? LANGUAGES[0];
+
+  function chooseRole(next: UserRole) {
+    setRole(next);
+    const limit = TEAM_LIMIT[next];
+    if (myTeams.length > limit) setTeams(myTeams.slice(0, limit));
+  }
 
   async function onAvatarFile(f: File | null) {
     if (!f) return;
@@ -139,21 +185,45 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
           </div>
         </div>
 
-        {/* Team */}
-        <Section title="YOUR TEAM">
-          <div style={{ paddingTop: 12, paddingBottom: 14 }}>
-            {team ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 46, height: 46, borderRadius: 13, background: `${accent}1a`, color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>{team.number}</div>
+        {/* Role */}
+        <Section title="MY ROLE">
+          <div style={{ paddingTop: 12, paddingBottom: 14, display: "flex", gap: 8 }}>
+            {(Object.keys(ROLE_LABEL) as UserRole[]).map((r) => {
+              const active = role === r;
+              return (
+                <button key={r} onClick={() => chooseRole(r)} style={{ flex: 1, background: active ? `${accent}16` : "#1a1e30", border: `1px solid ${active ? accent : "rgba(255,255,255,0.08)"}`, borderRadius: 12, padding: "10px 6px", color: active ? accent : "#9aa0bf", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, cursor: "pointer", transition: "all 0.18s" }}>
+                  {ROLE_LABEL[r]}
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+
+        {/* Teams (role-aware: student 1, parent 3, coach 8) */}
+        <Section title="MY TEAMS">
+          <div style={{ paddingTop: 12, paddingBottom: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+            {myTeams.map((tm, index) => (
+              <div key={tm.id} style={{ display: "flex", alignItems: "center", gap: 12, background: "#1a1e30", border: `1px solid ${index === 0 ? accent + "40" : "rgba(255,255,255,0.06)"}`, borderRadius: 13, padding: "10px 12px" }}>
+                <div style={{ width: 42, height: 42, borderRadius: 12, background: `${accent}1a`, color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12, flexShrink: 0 }}>{tm.number}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, color: "#e8eaf0" }}>{team.team_name}</p>
-                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#7a80a0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team.organization}{team.location?.region ? ` · ${team.location.region}` : ""}</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13.5, color: "#e8eaf0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tm.team_name}</p>
+                    {index === 0 ? <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8, letterSpacing: "0.08em", color: accent, background: `${accent}14`, border: `1px solid ${accent}35`, borderRadius: 5, padding: "1px 5px", flexShrink: 0 }}>PRIMARY</span> : null}
+                  </div>
+                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#7a80a0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tm.organization || "—"}{tm.program?.code ? ` · ${tm.program.code}` : ""}{tm.location?.region ? ` · ${tm.location.region}` : ""}</p>
                 </div>
-                <button onClick={() => setShowTeam(true)} style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 9, padding: "7px 12px", fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 12, color: "#e8eaf0", cursor: "pointer", flexShrink: 0 }}>Change</button>
+                {index !== 0 ? (
+                  <button onClick={() => setTeams([tm, ...myTeams.filter((x) => x.id !== tm.id)])} aria-label="Make primary" style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4 }}><ArrowUp size={14} style={{ color: "#7a80a0" }} /></button>
+                ) : null}
+                <button onClick={() => setTeams(myTeams.filter((x) => x.id !== tm.id))} aria-label="Remove team" style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4 }}><Trash2 size={14} style={{ color: "#4a5070" }} /></button>
               </div>
-            ) : (
-              <button onClick={() => setShowTeam(true)} style={{ width: "100%", background: `${accent}14`, border: `1px solid ${accent}40`, borderRadius: 12, padding: "12px", color: accent, fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Select your team</button>
-            )}
+            ))}
+            {myTeams.length < teamLimit ? (
+              <button onClick={() => setShowTeam(true)} style={{ width: "100%", background: `${accent}10`, border: `1px dashed ${accent}45`, borderRadius: 12, padding: "11px", color: accent, fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                <Plus size={15} /> Add team
+              </button>
+            ) : null}
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#5c627e", margin: 0 }}>{myTeams.length} of {teamLimit} team{teamLimit > 1 ? "s" : ""} · {role ? ROLE_LABEL[role] : "Student"} account</p>
           </div>
         </Section>
 
@@ -221,6 +291,30 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
           </div>
         </Section>
 
+        {/* Language */}
+        <Section title="LANGUAGE">
+          <SettingRow
+            icon={<Globe size={16} style={{ color: accent }} />}
+            iconBg={`${accent}15`}
+            label={currentLang.native}
+            sub="App text and AI answers use this language"
+            onClick={() => setShowLanguages((v) => !v)}
+          />
+          {showLanguages ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, paddingBottom: 14 }}>
+              {LANGUAGES.map((l) => {
+                const selected = language === l.code;
+                return (
+                  <button key={l.code} onClick={() => { setLanguage(l.code); setShowLanguages(false); }} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, textAlign: "left", background: selected ? `${accent}14` : "#1a1e30", border: `1px solid ${selected ? accent : "rgba(255,255,255,0.08)"}`, borderRadius: 12, padding: "10px 12px", cursor: "pointer" }}>
+                    <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0" }}>{l.native}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: selected ? accent : "#6a7090" }}>{l.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </Section>
+
         {/* Notifications */}
         <Section title="NOTIFICATIONS">
           <SettingRow
@@ -258,13 +352,19 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
           />
         </Section>
 
+        {/* Legal */}
+        <Section title="LEGAL">
+          <SettingRow icon={<span style={{ fontSize: 16 }}>⚖️</span>} label="Terms of Service" onClick={() => setLegalDoc("terms")} />
+          <SectionDivider />
+          <SettingRow icon={<span style={{ fontSize: 16 }}>📄</span>} label="Privacy Policy" onClick={() => setLegalDoc("privacy")} />
+          <SectionDivider />
+          <SettingRow icon={<span style={{ fontSize: 16 }}>📘</span>} label="Community Guidelines & Handbook" onClick={() => setLegalDoc("handbook")} />
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#5c627e", padding: "2px 0 12px", lineHeight: 1.5 }}>MatchMind is an independent app — not affiliated with VEX Robotics, Innovation First, or the REC Foundation.</p>
+        </Section>
+
         {/* About */}
         <Section title="ABOUT">
-          <SettingRow icon={<Info size={16} style={{ color: "#7a80a0" }} />} label="MatchMind" sub="Version 1.0.0 · Build 2025.06.04" />
-          <SectionDivider />
-          <SettingRow icon={<span style={{ fontSize: 16 }}>📄</span>} label="Privacy Policy" onClick={() => setNotice("MatchMind keeps RobotEvents tokens and AI keys server-side. Messages are workspace-only in this MVP and local until a database/realtime service is configured.")} />
-          <SectionDivider />
-          <SettingRow icon={<span style={{ fontSize: 16 }}>⚖️</span>} label="Terms of Service" onClick={() => setNotice("Predictions and AI suggestions are educational estimates. Teams should verify rules, match schedules, and judging requirements with official event staff.")} />
+          <SettingRow icon={<Info size={16} style={{ color: "#7a80a0" }} />} label="MatchMind" sub="Version 1.0.0" />
         </Section>
 
         {/* Sign out */}
@@ -286,10 +386,14 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
         <div onClick={() => setShowTeam(false)} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,6,13,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 20, color: "#fff", margin: 0 }}>Change team</h3>
+              <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 20, color: "#fff", margin: 0 }}>Add team</h3>
               <button onClick={() => setShowTeam(false)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
             </div>
-            <TeamSearch selectedId={team?.id} onSelect={(t: RoboTeam) => { setTeam(t); setShowTeam(false); }} />
+            <TeamSearch selectedId={team?.id} onSelect={(t: RoboTeam) => {
+              const next = myTeams.some((x) => x.id === t.id) ? myTeams : [...myTeams, t].slice(0, teamLimit);
+              setTeams(next);
+              setShowTeam(false);
+            }} />
           </div>
           <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
         </div>
@@ -307,6 +411,8 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
           <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
         </div>
       ) : null}
+
+      {legalDoc ? <LegalDocModal docKey={legalDoc} accent={accent} onClose={() => setLegalDoc(null)} /> : null}
 
       {/* Avatar picker modal */}
       {showAvatar ? (

@@ -9,7 +9,6 @@ import { HomePage } from "./components/pages/HomePage";
 import { LookupPage } from "./components/pages/LookupPage";
 import { CoachPage } from "./components/pages/CoachPage";
 import { ScoutPage } from "./components/pages/ScoutPage";
-import { MessagesPage } from "./components/pages/MessagesPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { TodoPage } from "./components/pages/TodoPage";
 import { AlliancePage } from "./components/pages/AlliancePage";
@@ -23,13 +22,7 @@ function greetingFor(name: string) {
 }
 
 function welcomeBody() {
-  const messages = [
-    "Scout smart, keep notes tight, and let the data guide your next match.",
-    "Your match dashboard, reminders, and AI strategy tools are ready.",
-    "Pick the next useful action: review stats, scout a match, or ask the AI coach.",
-    "Competition mode is ready. Stay calm, compare teams, and capture what matters.",
-  ];
-  return messages[new Date().getMinutes() % messages.length];
+  return "Welcome back to MatchMind.";
 }
 
 function toastColor(type?: AppNotification["type"], accent = "#00c8ff") {
@@ -104,7 +97,7 @@ function NotificationToast({ onNavigate }: { onNavigate: (id: string) => void })
     if (active.id !== "session-welcome") markNotificationSeen(active.id);
     else setWelcomeVisible(false);
     if (active.type === "todo") onNavigate("todos");
-    if (active.type === "message") onNavigate("messages");
+    if (active.type === "message") onNavigate("home");
     if (active.type === "match_win" || active.type === "match_loss" || active.type === "award") onNavigate("lookup");
   };
 
@@ -132,7 +125,6 @@ function AppShell() {
     if (path.includes("/teams") || path.includes("/events")) return "lookup";
     if (path.includes("/coach")) return "coach";
     if (path.includes("/scout")) return "scout";
-    if (path.includes("/messages")) return "messages";
     if (path.includes("/settings")) return "settings";
     return "home";
   });
@@ -151,7 +143,6 @@ function AppShell() {
     lookup: <LookupPage resetKey={lookupResetKey} onNavigate={changePage} />,
     coach: <CoachPage />,
     scout: <ScoutPage />,
-    messages: <MessagesPage onSignIn={() => setForceOnboarding(true)} />,
     settings: <SettingsPage onSignIn={() => setForceOnboarding(true)} />,
     todos: <TodoPage onBack={() => changePage("home")} />,
     alliance: <AlliancePage onBack={() => changePage("home")} />,

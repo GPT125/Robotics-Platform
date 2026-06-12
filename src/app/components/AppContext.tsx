@@ -106,12 +106,18 @@ export type Favorite = {
   createdAt: number;
 };
 
+export type UserRole = "student" | "coach" | "parent";
+
 type AppState = {
   onboarded: boolean;
   signedIn: boolean;
   isGuest: boolean;
   profile: Profile | null;
+  role: UserRole | null;
+  language: string;
+  agreedLegal: boolean;
   team: RoboTeam | null;
+  teams: RoboTeam[];
   teammates: Teammate[];
   todos: Todo[];
   scoutNotes: ScoutNote[];
@@ -126,6 +132,10 @@ type AppCtx = AppState & {
   continueAsGuest: () => void;
   signOut: () => void;
   setOnboarded: (v: boolean) => void;
+  setRole: (role: UserRole | null) => void;
+  setLanguage: (language: string) => void;
+  setAgreedLegal: (v: boolean) => void;
+  setTeams: (teams: RoboTeam[]) => void;
   setTeam: (team: RoboTeam | null) => void;
   updateProfile: (p: Partial<Profile>) => void;
   addTeammate: (t: { name: string; email: string }) => void;
@@ -156,7 +166,11 @@ const initial: AppState = {
   signedIn: false,
   isGuest: false,
   profile: null,
+  role: null,
+  language: "en",
+  agreedLegal: false,
   team: null,
+  teams: [],
   teammates: [],
   todos: [],
   scoutNotes: [],
@@ -202,6 +216,10 @@ function load(): AppState {
     return {
       ...initial,
       ...parsed,
+      role: parsed.role ?? null,
+      language: parsed.language ?? "en",
+      agreedLegal: Boolean(parsed.agreedLegal),
+      teams: parsed.teams ?? (parsed.team ? [parsed.team] : []),
       teammates: parsed.teammates ?? [],
       todos: (parsed.todos ?? []).map(normalizeTodo),
       scoutNotes: parsed.scoutNotes ?? [],
@@ -271,7 +289,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })),
     signOut: () => setState((s) => ({ ...initial, todos: s.todos })),
     setOnboarded: (v) => setState((s) => ({ ...s, onboarded: v })),
-    setTeam: (team) => setState((s) => ({ ...s, team })),
+    setRole: (role) => setState((s) => ({ ...s, role })),
+    setLanguage: (language) => setState((s) => ({ ...s, language })),
+    setAgreedLegal: (v) => setState((s) => ({ ...s, agreedLegal: v })),
+    setTeams: (teams) => setState((s) => ({ ...s, teams, team: teams[0] ?? null })),
+    setTeam: (team) => setState((s) => ({
+      ...s,
+      team,
+      teams: team ? [team, ...s.teams.filter((t) => t.id !== team.id)] : s.teams,
+    })),
     updateProfile: (p) => setState((s) => ({ ...s, profile: { name: p.name ?? s.profile?.name ?? "You", email: p.email ?? s.profile?.email ?? null, avatar: p.avatar ?? s.profile?.avatar ?? "🤖" } })),
     addTeammate: (t) => setState((s) => ({ ...s, teammates: [...s.teammates, { id: uid(), name: t.name, email: t.email, status: "invited" }] })),
     removeTeammate: (id) => setState((s) => ({ ...s, teammates: s.teammates.filter((x) => x.id !== id) })),

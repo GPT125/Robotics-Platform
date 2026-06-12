@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical, Sparkles, MessageCircle } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
+import { MatchCard } from "../MatchCard";
 import { useApp, type Favorite, type RoboTeam, type ScoutNote } from "../AppContext";
 import { getMatchMindEventTeams, getTournamentChat, joinTournamentChat, listAllianceOffers, sendAllianceOffer, sendTournamentMessage, type TournamentChatSnapshot, type AllianceOffer } from "../../../services/firebaseBackend";
 import {
@@ -727,28 +728,14 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
       <div style={{ margin: "0 16px 14px", background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 16 }}>
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", marginBottom: 10 }}>Match History</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {filteredMatches.map((m) => {
-            const s = scoreForTeam(m, seed.number);
-            const context = teamMatchContext(m, seed.number);
-            const predicted = !s ? Math.max(28, Math.min(72, stats.winRate ?? 50)) : null;
-            return (
-              <div key={m.id} style={{ background: s ? (s.won ? "#10b98112" : "#ff3b5c12") : "#1a1e30", border: `1px solid ${s ? (s.won ? "#10b98130" : "#ff3b5c30") : "transparent"}`, borderRadius: 11, padding: "10px 10px 10px 12px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 12.5, color: "#e8eaf0" }}>{matchLabel(m)}</p>
-                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: "#7a80a0" }}>{m.event?.name ?? "Event"}{m.field ? ` · ${m.field}` : ""}</p>
-                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#9aa0bf", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {context ? `${context.color.toUpperCase()} with ${context.partners.map((t) => t.number).join(", ")} vs ${context.opponents.map((t) => t.number).join(", ") || "TBD"}` : "Alliance data unavailable"}
-                  </p>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: s?.won ? "#10b981" : s ? "#ff3b5c" : accent, fontWeight: 700 }}>{s ? `${s.ours}-${s.theirs}` : `Win ${predicted}%`}</p>
-                  <button onClick={() => setMatchNoteTarget(m)} aria-label={`Scout ${matchLabel(m)}`} style={{ width: 30, height: 30, borderRadius: 9, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                    <MoreVertical size={15} style={{ color: "#e8eaf0" }} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          {filteredMatches.map((m) => (
+            <div key={m.id} style={{ position: "relative" }}>
+              <MatchCard match={m} highlightTeam={seed.number} accent={accent} />
+              <button onClick={() => setMatchNoteTarget(m)} aria-label={`Scout ${matchLabel(m)}`} style={{ position: "absolute", top: 7, right: 8, width: 26, height: 26, borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <MoreVertical size={13} style={{ color: "#9aa0bf" }} />
+              </button>
+            </div>
+          ))}
           {!filteredMatches.length ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#7a80a0" }}>No matches returned by RobotEvents for this school year.</p> : null}
         </div>
       </div>

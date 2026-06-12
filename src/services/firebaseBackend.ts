@@ -4,6 +4,7 @@ import { functions } from "../lib/firebase";
 type CallableResult<T> = { data: T };
 
 async function callBackend<T>(name: string, data: Record<string, unknown>): Promise<T> {
+  if (!functions) throw new Error("Cloud Functions backend is not available right now.");
   const callable = httpsCallable(functions, name);
   const result = await callable(data) as CallableResult<T>;
   return result.data;

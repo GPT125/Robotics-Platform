@@ -4,6 +4,8 @@ import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
 import { askCoach, matchAlliances, matchLabel, searchTeams, teamAwards, teamEvents, teamMatches, type CoachSource, type RoboAward, type RoboEvent, type RoboMatch } from "../../../services/api";
 import { downscaleImage, readFileAsDataUrl, extractVideoFrames } from "../media";
+import { LANGUAGE_NAME } from "../../../services/i18n";
+import { predictorStats } from "../../../services/predictor";
 
 type Attachment = { id: string; kind: "image" | "video"; preview: string; images: string[] };
 type Message = { role: "user" | "ai"; text: string; time: string; sources?: CoachSource[]; images?: string[] };
@@ -171,7 +173,7 @@ function Sources({ sources, accent }: { sources: CoachSource[]; accent: string }
 
 export function CoachPage() {
   const { accent } = useAccent();
-  const { team, profile } = useApp();
+  const { team, profile, language } = useApp();
   const [sessions, setSessions] = useState<CoachSession[]>(loadSessions);
   const [activeSessionId, setActiveSessionId] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -318,6 +320,17 @@ export function CoachPage() {
       robotEventsData.awards.length ? `RobotEvents awards: ${robotEventsData.awards.slice(0, 6).map(awardTitle).join("; ")}.` : "",
       recentMatches ? `Recent matches: ${recentMatches}.` : "",
       "Use official RobotEvents data and saved MatchMind context when available. If a team fact is missing, say the data is missing instead of guessing. If the next match is soon, naturally acknowledge it.",
+      // Program-correct rules grounding — never guess rules from the wrong game.
+      (() => {
+        const code = (team?.program?.code ?? "").toUpperCase();
+        if (code.includes("IQ")) return "RULES: default to VEX IQ (VIQRC) rules. Official manual: https://link.vex.com/docs/viqrc-manual . VIQRC plays cooperative 2-team Teamwork matches (one combined score) and has NO alliance selection.";
+        if (code.includes("U")) return "RULES: default to VEX U (VURC) rules. Official manual: https://link.vex.com/docs/vurc-manual . VEX U is head-to-head, one team per alliance with two robots, and has NO alliance selection.";
+        return "RULES: default to V5RC (VRC) rules. Official manual: https://link.vex.com/docs/v5rc-manual . V5RC plays 2v2 (Red vs Blue); after qualifications the top-ranked teams become alliance captains (8 or 16 alliances depending on event size) and each picks one partner.";
+      })(),
+      "Only the official game manual, official Q&A, and head referees are authoritative for rules — say so when a ruling matters.",
+      `Respond in ${LANGUAGE_NAME[(language as keyof typeof LANGUAGE_NAME)] ?? "English"}.`,
+      "Do not end messages with emojis; use at most one emoji and only when genuinely helpful.",
+      (() => { const ps = predictorStats(); return ps.total > 0 ? `MatchMind's AI match predictor record so far: ${ps.correct}/${ps.total} correct — it learns from every miss.` : ""; })(),
     ];
     return parts.filter(Boolean).join(" ");
   }

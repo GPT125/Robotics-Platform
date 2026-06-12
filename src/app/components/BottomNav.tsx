@@ -1,13 +1,16 @@
-import { Home, Search, BrainCircuit, Telescope, MessageCircle, Settings } from "lucide-react";
+import { Home, Search, BrainCircuit, Telescope, Settings } from "lucide-react";
 import { useAccent } from "./AccentContext";
+import { useApp } from "./AppContext";
+import { t } from "../../services/i18n";
 
+// 5 pages for every role. Messages is intentionally parked (kept in
+// MessagesPage.tsx for when it returns) and removed from the menu.
 const tabs = [
-  { id: "home", label: "Home", icon: Home },
-  { id: "lookup", label: "Lookup", icon: Search },
-  { id: "coach", label: "Coach", icon: BrainCircuit },
-  { id: "scout", label: "Scout", icon: Telescope },
-  { id: "messages", label: "Messages", icon: MessageCircle },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "home", labelKey: "home" as const, icon: Home },
+  { id: "lookup", labelKey: "lookup" as const, icon: Search },
+  { id: "coach", labelKey: "coach" as const, icon: BrainCircuit },
+  { id: "scout", labelKey: "scout" as const, icon: Telescope },
+  { id: "settings", labelKey: "settings" as const, icon: Settings },
 ];
 
 interface BottomNavProps {
@@ -17,6 +20,7 @@ interface BottomNavProps {
 
 export function BottomNav({ active, onChange }: BottomNavProps) {
   const { accent } = useAccent();
+  const { language } = useApp();
 
   return (
     <nav
@@ -41,8 +45,9 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
           padding: "8px 4px var(--rl-nav-bottom)",
         }}
       >
-        {tabs.map(({ id, label, icon: Icon }) => {
+        {tabs.map(({ id, labelKey, icon: Icon }) => {
           const isActive = active === id;
+          const label = t(language, labelKey);
           return (
             <button
               key={id}

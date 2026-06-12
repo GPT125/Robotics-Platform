@@ -3,7 +3,8 @@ import { Trophy, Zap, Target, Clock, TrendingUp, ChevronRight, Star, ListChecks,
 import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
-import { teamAwards, teamEvents, teamMatches, matchAlliances, matchLabel, type RoboAward, type RoboEvent, type RoboMatch } from "../../../services/api";
+import { MatchCard } from "../MatchCard";
+import { eventRankings, teamAwards, teamEvents, teamMatches, matchAlliances, matchLabel, type RoboAward, type RoboEvent, type RoboMatch, type RoboRanking } from "../../../services/api";
 
 function shortDate(value?: string | null) {
   if (!value) return "TBD";
@@ -79,6 +80,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
   const [matches, setMatches] = useState<RoboMatch[]>([]);
   const [events, setEvents] = useState<RoboEvent[]>([]);
   const [awards, setAwards] = useState<RoboAward[]>([]);
+  const [nextRankings, setNextRankings] = useState<RoboRanking[]>([]);
   const [loading, setLoading] = useState(false);
   const [stale, setStale] = useState(false);
   const awardsRef = useRef<HTMLDivElement | null>(null);
@@ -221,6 +223,15 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
   }));
   const recent = scored.slice(0, 4);
   const nextMatch = team ? seasonMatches.find((m) => !matchScore(m, team.number) && teamSide(m, team.number)) : null;
+  const nextMatchEventId = nextMatch?.event?.id ?? null;
+
+  // Load live rankings for the next match's event so its AI prediction bar is real.
+  useEffect(() => {
+    let alive = true;
+    if (!nextMatchEventId) { setNextRankings([]); return; }
+    eventRankings(nextMatchEventId).then((r) => { if (alive) setNextRankings(r); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [nextMatchEventId]);
   const freshLabel = stale ? "Stale" : loading ? "Updating" : team ? "" : "Offline";
   const visibleNotification = notifications.find((n) => !n.seen) ?? notifications[0];
   const nColor = notificationColor(visibleNotification?.type);
@@ -228,19 +239,13 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
   const visibleEventIds = useMemo(() => new Set(visibleEvents.map((event) => event.id)), [visibleEvents]);
   const visibleAwards = useMemo(() => awards.filter((award) => !currentSchoolYear || !award.event?.id || visibleEventIds.has(award.event.id)), [awards, currentSchoolYear, visibleEventIds]);
   const displayName = (profile?.name || team?.number || "driver").trim().split(/\s+/)[0] || "driver";
-  const avatarIsImage = profile?.avatar?.startsWith("data:") || profile?.avatar?.startsWith("http");
 
   return (
     <div style={{ padding: "var(--rl-page-top) 16px var(--rl-page-bottom)", display: "flex", flexDirection: "column", gap: 18 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#7a80a0", letterSpacing: "0.1em" }}>{team ? `TEAM ${team.number}` : "NO TEAM SELECTED"}</p>
-          <h1 style={{ fontFamily: "'Exo 2', sans-serif", fontSize: 28, fontWeight: 900, color: "#e8eaf0", lineHeight: 1.1, marginTop: 2 }}>MatchMind</h1>
-          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#9aa0bf", lineHeight: 1.4, marginTop: 4 }}>{greetingFor(displayName)}</p>
-        </div>
-        <div style={{ width: 44, height: 44, borderRadius: "50%", background: `linear-gradient(135deg, ${accent} 0%, #7c3aed 100%)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 20px ${accent}40`, overflow: "hidden" }}>
-          {avatarIsImage ? <img src={profile?.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, color: "#fff" }}>{profile?.avatar || "MM"}</span>}
-        </div>
+      <div>
+        <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#7a80a0", letterSpacing: "0.1em" }}>{team ? `TEAM ${team.number}` : "NO TEAM SELECTED"}</p>
+        <h1 style={{ fontFamily: "'Exo 2', sans-serif", fontSize: 28, fontWeight: 900, color: "#e8eaf0", lineHeight: 1.1, marginTop: 2 }}>MatchMind</h1>
+        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#9aa0bf", lineHeight: 1.4, marginTop: 4 }}>{greetingFor(displayName)}</p>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
@@ -303,7 +308,7 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
                 labelFormatter={(_label, payload: any[]) => payload?.[0]?.payload ? `${payload[0].payload.label} · ${payload[0].payload.result}` : "Match"}
                 formatter={(v: unknown, _name: unknown, payload: any) => [`${v} vs ${payload?.payload?.opponent ?? "TBD"}`, "Score"]}
               />
-              <Line type="monotone" dataKey="v" stroke="url(#lg)" strokeWidth={2.5} dot={false} activeDot={{ r: 4, strokeWidth: 0, fill: "#fff" }} />
+              <Line type="monotone" dataKey="v" stroke="url(#lg)" strokeWidth={2.5} dot={false} activeDot={false} />
             </LineChart>
           </ResponsiveContainer>
         ) : (
@@ -312,12 +317,12 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
       </div>
 
       {nextMatch ? (
-        <div style={{ background: `${accent}10`, border: `1px solid ${accent}30`, borderRadius: 14, padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <Clock size={16} style={{ color: accent, flexShrink: 0, marginTop: 1 }} />
-          <div>
-            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 12, color: accent }}>Next match: {matchLabel(nextMatch)}</p>
-            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9aa0bf", marginTop: 2 }}>{nextMatch.field ? `${nextMatch.field} · ` : ""}{nextMatch.scheduled ? new Date(nextMatch.scheduled).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Time TBD"} · Show up 10-15 minutes early.</p>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, color: "#e8eaf0" }}>Next Match</p>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0" }}>arrive 10–15 min early</span>
           </div>
+          <MatchCard match={nextMatch} rankings={nextRankings} highlightTeam={team?.number} accent={accent} />
         </div>
       ) : null}
 
@@ -327,21 +332,9 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
           <button onClick={() => onNavigate?.("lookup")} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: accent }}>View all</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {recent.length ? recent.map(({ match, score }) => {
-            const won = Boolean(score?.won);
-            return (
-              <div key={match.id} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: (won ? "#10b981" : "#ff3b5c") + "18", border: `1px solid ${(won ? "#10b981" : "#ff3b5c")}35`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, color: won ? "#10b981" : "#ff3b5c" }}>{won ? "W" : "L"}</span>
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0" }}>{matchLabel(match)} vs {score?.side.opponents.map((t) => t.number).join(", ") || "TBD"}</p>
-                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: "#7a80a0" }}>{match.event?.name ?? "RobotEvents match"}</p>
-                </div>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, color: won ? "#10b981" : "#ff3b5c", flexShrink: 0 }}>{score?.label}</p>
-              </div>
-            );
-          }) : (
+          {recent.length ? recent.map(({ match }) => (
+            <MatchCard key={match.id} match={match} highlightTeam={team?.number} accent={accent} />
+          )) : (
             <div style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 16, color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 12 }}>{team ? "No official match results found for this team yet." : "Select a team to see official matches."}</div>
           )}
         </div>
