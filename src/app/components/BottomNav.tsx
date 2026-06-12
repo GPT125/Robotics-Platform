@@ -85,7 +85,7 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
                   size={18}
                   strokeWidth={isActive ? 2.5 : 1.8}
                   style={{
-                    color: isActive ? accent : "rgba(255,255,255,0.28)",
+                    color: isActive ? accent : "rgba(255,255,255,0.5)",
                     filter: isActive ? `drop-shadow(0 0 6px ${accent}80)` : "none",
                     transition: "all 0.2s",
                   }}
@@ -96,7 +96,7 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
                   fontFamily: "'Exo 2', sans-serif",
                   fontSize: "9px",
                   fontWeight: isActive ? 700 : 500,
-                  color: isActive ? accent : "rgba(255,255,255,0.28)",
+                  color: isActive ? accent : "rgba(255,255,255,0.5)",
                   letterSpacing: "0.02em",
                   transition: "color 0.2s",
                   overflow: "hidden",

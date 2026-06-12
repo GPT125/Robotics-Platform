@@ -179,8 +179,10 @@ function AppShell() {
       <style>{`
         @keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toastIn { from { opacity: 0; transform: translateY(-12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        button { -webkit-tap-highlight-color: transparent; }
-        button:active { transform: scale(0.97); }
+        button { -webkit-tap-highlight-color: transparent; transition: transform 0.16s cubic-bezier(0.22,1,0.36,1), filter 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease; }
+        button:not(:disabled):hover { filter: brightness(1.08); }
+        button:not(:disabled):active { transform: scale(0.96); filter: brightness(0.96); }
+        button:disabled { cursor: default; }
         ::-webkit-scrollbar { width: 0; height: 0; }
       `}</style>
     </div>
