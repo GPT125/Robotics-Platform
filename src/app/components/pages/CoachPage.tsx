@@ -6,6 +6,7 @@ import { askCoach, matchAlliances, matchLabel, searchTeams, teamAwards, teamEven
 import { downscaleImage, readFileAsDataUrl, extractVideoFrames } from "../media";
 import { LANGUAGE_NAME } from "../../../services/i18n";
 import { predictorStats } from "../../../services/predictor";
+import { transcribeVoice } from "../../../services/firebaseBackend";
 
 type Attachment = { id: string; kind: "image" | "video"; preview: string; images: string[] };
 type Message = { role: "user" | "ai"; text: string; time: string; sources?: CoachSource[]; images?: string[] };
@@ -477,10 +478,13 @@ export function CoachPage() {
 
   function startAudioRecorder(stream: MediaStream) {
     voiceChunksRef.current = [];
-    const mime = MediaRecorder.isTypeSupported?.("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
-    voiceMimeRef.current = mime;
+    // iOS/WKWebView cannot record webm — fall through to mp4/aac so the clip is
+    // always a format the transcription backend (Whisper) accepts.
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4;codecs=mp4a.40.2", "audio/mp4", "audio/aac"];
+    const mime = candidates.find((c) => MediaRecorder.isTypeSupported?.(c)) ?? "";
+    voiceMimeRef.current = mime || "audio/mp4";
     try {
-      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
       recorder.ondataavailable = (event) => {
         if (event.data?.size) voiceChunksRef.current.push(event.data);
       };
@@ -495,8 +499,12 @@ export function CoachPage() {
     if (!voiceChunksRef.current.length) return "";
     const blob = new Blob(voiceChunksRef.current, { type: voiceMimeRef.current });
     if (!blob.size) return "";
-    await blobToDataUrl(blob);
-    return "";
+    // Send the recorded clip to the backend (Whisper) and use the returned text
+    // — this is what makes voice mode work where the browser has no on-device
+    // speech recognition (e.g. iOS WebView).
+    const dataUrl = await blobToDataUrl(blob);
+    const result = await transcribeVoice({ audioBase64: dataUrl, mimeType: voiceMimeRef.current });
+    return (result.text ?? "").trim();
   }
 
   async function finishVoiceSession(shouldSend: boolean) {
