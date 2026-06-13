@@ -20,13 +20,15 @@ export type TournamentChatSnapshot = {
   messages: Array<{ id: string; firstName: string; teamNumber: string; body: string; createdAt: string | null }>;
 };
 
+export type OfferResponse = "accepted" | "declined" | "thinking" | "meeting";
+
 export type AllianceOffer = {
   id: string;
   eventId: string;
   fromTeam: string;
   toTeam: string;
   message: string;
-  status: "sent" | "accepted" | "declined";
+  status: "sent" | OfferResponse;
 };
 
 export async function joinTournamentChat(input: { eventId: string | number; displayName?: string; teamNumber: string; program?: string }) {
@@ -51,6 +53,18 @@ export async function sendAllianceOffer(input: { eventId: string | number; fromT
 
 export async function listAllianceOffers(eventId: string | number, teamNumber: string) {
   return callBackend<{ offers: AllianceOffer[] }>("listAllianceOffers", { eventId, teamNumber });
+}
+
+export async function registerForAllianceOffers(input: { eventId: string | number; teamNumber: string; role?: string; displayName?: string; notify?: boolean }) {
+  return callBackend<{ ok: boolean }>("registerForAllianceOffers", input);
+}
+
+export async function respondToAllianceOffer(input: { eventId: string | number; fromTeam: string; toTeam: string; response: OfferResponse }) {
+  return callBackend<{ ok: boolean }>("respondToAllianceOffer", input);
+}
+
+export async function listSentAllianceOffers(eventId: string | number, teamNumber: string) {
+  return callBackend<{ offers: AllianceOffer[] }>("listSentAllianceOffers", { eventId, teamNumber });
 }
 
 export async function firebaseRobotEvents<T = unknown>(path: string) {

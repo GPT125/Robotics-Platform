@@ -128,7 +128,8 @@ async function eventWindow(eventId: string | number): Promise<EventWindow> {
     opensAt: new Date(start.getTime() - 2 * 24 * 60 * 60 * 1000),
     closesAt: new Date(end.getTime() + 12 * 60 * 60 * 1000),
     allianceSelectionAt: estimatedAllianceSelection,
-    offerOpensAt: new Date(estimatedAllianceSelection.getTime() - 60 * 60 * 1000),
+    // Alliance offers open 30 minutes before alliance selection.
+    offerOpensAt: new Date(estimatedAllianceSelection.getTime() - 30 * 60 * 1000),
   };
 }
 
@@ -139,7 +140,7 @@ function assertInWindow(window: EventWindow, now = new Date()) {
 
 function assertOfferWindow(window: EventWindow, now = new Date()) {
   assertInWindow(window, now);
-  if (window.offerOpensAt && now < window.offerOpensAt) throw new HttpsError("failed-precondition", "Alliance offers open one hour before alliance selection.");
+  if (window.offerOpensAt && now < window.offerOpensAt) throw new HttpsError("failed-precondition", "Alliance offers open 30 minutes before alliance selection.");
 }
 
 export const robotEventsProxy = onCall({ secrets: [ROBOTEVENTS_API_TOKEN] }, async (request) => {
@@ -334,6 +335,90 @@ export const listAllianceOffers = onCall(async (request) => {
   return {
     offers: snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
   };
+});
+
+type OfferResponse = "accepted" | "declined" | "thinking" | "meeting";
+const OFFER_RESPONSES: OfferResponse[] = ["accepted", "declined", "thinking", "meeting"];
+
+async function membershipUser(eventId: string, teamNumber: string, uid: string) {
+  const doc = await db.collection("eventMemberships").doc(`${eventId}_${teamNumber}`).collection("users").doc(uid).get();
+  return doc.exists ? (doc.data() as { role?: string; firstName?: string; notifyAllianceOffers?: boolean }) : null;
+}
+
+// Register a signed-in user (and their team) for an event so alliance offers can
+// be received. Replaces the old chat-join registration. Stores the account role
+// so only students receive/answer offers, and a per-user notify preference.
+export const registerForAllianceOffers = onCall(async (request) => {
+  requireAuth(request.auth?.uid);
+  const uid = request.auth!.uid;
+  const data = request.data as { eventId?: string | number; teamNumber?: string; role?: string; displayName?: string; notify?: boolean };
+  const eventId = cleanText(data.eventId, 80);
+  const teamNumber = cleanText(data.teamNumber, 24).toUpperCase();
+  if (!eventId || !teamNumber) throw new HttpsError("invalid-argument", "Event and team number are required.");
+  const role = cleanText(data.role, 24).toLowerCase() || "student";
+  const teamRef = db.collection("eventMemberships").doc(`${eventId}_${teamNumber}`);
+  await teamRef.set({ eventId, teamNumber, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await teamRef.collection("users").doc(uid).set({
+    uid,
+    role,
+    firstName: firstName(data.displayName ?? request.auth?.token.name ?? ""),
+    notifyAllianceOffers: data.notify !== false,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return { ok: true };
+});
+
+// A student on the recipient team answers an offer (accept / decline / think /
+// meet up). The sender is notified of the response.
+export const respondToAllianceOffer = onCall(async (request) => {
+  requireAuth(request.auth?.uid);
+  const uid = request.auth!.uid;
+  const data = request.data as { eventId?: string | number; fromTeam?: string; toTeam?: string; response?: string };
+  const eventId = cleanText(data.eventId, 80);
+  const fromTeam = cleanText(data.fromTeam, 24).toUpperCase();
+  const toTeam = cleanText(data.toTeam, 24).toUpperCase();
+  const response = cleanText(data.response, 24).toLowerCase() as OfferResponse;
+  if (!eventId || !fromTeam || !toTeam) throw new HttpsError("invalid-argument", "Missing offer details.");
+  if (!OFFER_RESPONSES.includes(response)) throw new HttpsError("invalid-argument", "Invalid response.");
+  const me = await membershipUser(eventId, toTeam, uid);
+  if (!me || me.role !== "student") throw new HttpsError("permission-denied", "Only student accounts on this team can respond to alliance offers.");
+  const offerRef = db.collection("tournamentChats").doc(eventId).collection("allianceOffers").doc(`${fromTeam}_${toTeam}`);
+  const offer = await offerRef.get();
+  if (!offer.exists) throw new HttpsError("not-found", "That offer no longer exists.");
+  await offerRef.set({ status: response, respondedAt: FieldValue.serverTimestamp(), respondedBy: uid }, { merge: true });
+  const labels: Record<OfferResponse, string> = {
+    accepted: "accepted your alliance offer",
+    declined: "declined your alliance offer",
+    thinking: "is thinking about your alliance offer",
+    meeting: "wants to meet up to discuss your offer",
+  };
+  await db.collection("notifications").add({
+    eventId,
+    teamNumber: fromTeam,
+    type: "alliance_response",
+    title: `${toTeam} ${labels[response]}`,
+    body: "",
+    fromTeam: toTeam,
+    response,
+    createdAt: FieldValue.serverTimestamp(),
+    seen: false,
+  });
+  return { ok: true };
+});
+
+// Offers the team has SENT, with their current status — powers the sender's
+// dynamic "offer status" view.
+export const listSentAllianceOffers = onCall(async (request) => {
+  requireAuth(request.auth?.uid);
+  const data = request.data as { eventId?: string | number; teamNumber?: string };
+  const eventId = cleanText(data.eventId, 80);
+  const teamNumber = cleanText(data.teamNumber, 24).toUpperCase();
+  const snap = await db.collection("tournamentChats").doc(eventId).collection("allianceOffers")
+    .where("fromTeam", "==", teamNumber)
+    .orderBy("createdAt", "desc")
+    .limit(80)
+    .get();
+  return { offers: snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) };
 });
 
 type CoachMessage = { role: "system" | "user" | "assistant"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> };

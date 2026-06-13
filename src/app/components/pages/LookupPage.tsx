@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical, Sparkles } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
 import { MatchCard } from "../MatchCard";
 import { useApp, type Favorite, type RoboTeam, type ScoutNote } from "../AppContext";
-import { getMatchMindEventTeams, listAllianceOffers, sendAllianceOffer, type AllianceOffer } from "../../../services/firebaseBackend";
+import { getMatchMindEventTeams, listAllianceOffers, listSentAllianceOffers, registerForAllianceOffers, respondToAllianceOffer, sendAllianceOffer, type AllianceOffer, type OfferResponse } from "../../../services/firebaseBackend";
 import {
   allianceTeams,
   awardWinnerTeams,
@@ -72,6 +72,17 @@ function loc(team: RoboTeamResult) {
 function eventLoc(event: RoboEvent) {
   return [event.location?.city, event.location?.region].filter(Boolean).join(", ") || event.location?.country || "Location TBD";
 }
+
+const ALLIANCE_NOTIFY_KEY = "matchmind:alliance-notify";
+const ALLIANCE_DISCLAIMER_KEY = "matchmind:alliance-disclaimer-agreed";
+
+const OFFER_STATUS_META: Record<string, { label: string; color: string }> = {
+  sent: { label: "Awaiting response", color: "#9aa0bf" },
+  accepted: { label: "Accepted", color: "#10b981" },
+  declined: { label: "Declined", color: "#ff6b7a" },
+  thinking: { label: "Thinking about it", color: "#f59e0b" },
+  meeting: { label: "Wants to meet up", color: "#38bdf8" },
+};
 
 function eventLivestreamUrl(event: RoboEvent) {
   const links = [
@@ -810,7 +821,7 @@ function awardQualificationText(a: RoboAward) {
 }
 
 function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent; accent: string; onBack: () => void; onTeamClick: (team: RoboTeamResult) => void }) {
-  const { addScoutNote, team: appTeam } = useApp();
+  const { addScoutNote, team: appTeam, role: appRole, profile: appProfile } = useApp();
   const [profile, setProfile] = useState<EventProfile>({ event, teams: [], matches: [], awards: [], rankings: [], skills: [] });
   const [evTab, setEvTab] = useState<"teams" | "matches" | "rankings" | "skills" | "awards">("matches");
   const [metricSort, setMetricSort] = useState<"rank" | "opr" | "dpr" | "ccwm">("rank");
@@ -825,6 +836,14 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
   const [offerTarget, setOfferTarget] = useState("");
   const [offerMessage, setOfferMessage] = useState("");
   const [offers, setOffers] = useState<AllianceOffer[]>([]);
+  const [sentOffers, setSentOffers] = useState<AllianceOffer[]>([]);
+  const [offerBusyId, setOfferBusyId] = useState("");
+  const [disclaimerOpen, setDisclaimerOpen] = useState(false);
+  const [disclaimerRead, setDisclaimerRead] = useState(false);
+  const isStudent = appRole === "student";
+  const [notifyOffers, setNotifyOffers] = useState(() => {
+    try { return window.localStorage.getItem(ALLIANCE_NOTIFY_KEY) !== "off"; } catch { return true; }
+  });
   const analytics = useMemo(() => eventAnalytics(profile), [profile.matches, profile.teams]);
   const livestreamUrl = useMemo(() => eventLivestreamUrl(event), [event]);
   // Day tabs come from the days that ACTUALLY have matches (derived from each
@@ -972,30 +991,97 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
     if (!selectedDayKey || !eventDays.includes(selectedDayKey)) setSelectedDayKey(eventDays[0] ?? "");
   }, [eventDays, selectedDayKey, showDaySlider]);
 
+  const loadOffers = useCallback(async () => {
+    if (!appTeam) { setOffers([]); setSentOffers([]); return; }
+    const [incoming, sent] = await Promise.all([
+      listAllianceOffers(event.id, appTeam.number).catch(() => ({ offers: [] })),
+      listSentAllianceOffers(event.id, appTeam.number).catch(() => ({ offers: [] })),
+    ]);
+    setOffers(incoming.offers ?? []);
+    setSentOffers(sent.offers ?? []);
+  }, [appTeam, event.id]);
+
   useEffect(() => {
     let alive = true;
     if (!eventPanelOpen) return;
+    // Register this signed-in user + team so they can receive alliance offers
+    // (replaces the old chat-join registration). Role gates student-only
+    // delivery; notify carries the opt-out preference.
+    if (appTeam) {
+      registerForAllianceOffers({
+        eventId: event.id,
+        teamNumber: appTeam.number,
+        role: appRole ?? "student",
+        displayName: appProfile?.name,
+        notify: notifyOffers,
+      }).catch(() => { /* backend may be offline; offers just won't flow */ });
+    }
     Promise.all([
       getMatchMindEventTeams(event.id).catch(() => ({ teams: [] })),
       appTeam ? listAllianceOffers(event.id, appTeam.number).catch(() => ({ offers: [] })) : Promise.resolve({ offers: [] }),
-    ]).then(([teams, eventOffers]) => {
+      appTeam ? listSentAllianceOffers(event.id, appTeam.number).catch(() => ({ offers: [] })) : Promise.resolve({ offers: [] }),
+    ]).then(([teams, incoming, sent]) => {
       if (!alive) return;
       setMatchMindTeams(teams?.teams ?? []);
-      setOffers(eventOffers.offers ?? []);
+      setOffers(incoming.offers ?? []);
+      setSentOffers(sent.offers ?? []);
     });
     return () => { alive = false; };
-  }, [appTeam, event.id, eventPanelOpen]);
+  }, [appTeam, appProfile?.name, appRole, event.id, eventPanelOpen, notifyOffers]);
 
-  async function sendOffer() {
+  // Poll for offer/response updates while the panel is open so the status view
+  // and incoming offers stay live without a manual refresh.
+  useEffect(() => {
+    if (!eventPanelOpen || !appTeam) return;
+    const id = window.setInterval(() => { void loadOffers(); }, 15000);
+    return () => window.clearInterval(id);
+  }, [appTeam, eventPanelOpen, loadOffers]);
+
+  function toggleNotifyOffers(next: boolean) {
+    setNotifyOffers(next);
+    try { window.localStorage.setItem(ALLIANCE_NOTIFY_KEY, next ? "on" : "off"); } catch { /* ignore */ }
+    if (appTeam) {
+      registerForAllianceOffers({ eventId: event.id, teamNumber: appTeam.number, role: appRole ?? "student", displayName: appProfile?.name, notify: next }).catch(() => { /* ignore */ });
+    }
+  }
+
+  async function doSendOffer() {
     if (!appTeam || !offerTarget.trim()) return;
     try {
       setEventBackendStatus("Sending alliance offer...");
       await sendAllianceOffer({ eventId: event.id, fromTeam: appTeam.number, toTeam: offerTarget.trim().toUpperCase(), message: offerMessage.trim() || `${appTeam.number} wants to talk alliance strategy.` });
       setOfferTarget("");
       setOfferMessage("");
-      setEventBackendStatus("Offer sent if that team is registered with MatchMind and the alliance window is open.");
+      setEventBackendStatus("Offer sent. You'll see the team's response in your offer status below.");
+      void loadOffers();
     } catch (error) {
       setEventBackendStatus(error instanceof Error ? error.message : "Alliance offer failed.");
+    }
+  }
+
+  function attemptSendOffer() {
+    if (!appTeam || !offerTarget.trim()) return;
+    let agreed = false;
+    try { agreed = window.localStorage.getItem(ALLIANCE_DISCLAIMER_KEY) === "yes"; } catch { /* ignore */ }
+    if (!agreed) { setDisclaimerRead(false); setDisclaimerOpen(true); return; }
+    void doSendOffer();
+  }
+
+  function agreeDisclaimerAndSend() {
+    try { window.localStorage.setItem(ALLIANCE_DISCLAIMER_KEY, "yes"); } catch { /* ignore */ }
+    setDisclaimerOpen(false);
+    void doSendOffer();
+  }
+
+  async function respondOffer(offer: AllianceOffer, response: OfferResponse) {
+    setOfferBusyId(offer.id);
+    try {
+      await respondToAllianceOffer({ eventId: event.id, fromTeam: offer.fromTeam, toTeam: offer.toTeam, response });
+      await loadOffers();
+    } catch (error) {
+      setEventBackendStatus(error instanceof Error ? error.message : "Could not send your response.");
+    } finally {
+      setOfferBusyId("");
     }
   }
 
@@ -1059,8 +1145,92 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
               <input value={offerTarget} onChange={(e) => setOfferTarget(e.target.value)} placeholder="Team" style={{ minWidth: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#e8eaf0", padding: "9px 10px", outline: "none", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
               <input value={offerMessage} onChange={(e) => setOfferMessage(e.target.value)} placeholder="Short offer note" style={{ minWidth: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#e8eaf0", padding: "9px 10px", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 12.5 }} />
             </div>
-            <button onClick={sendOffer} disabled={!appTeam || !offerTarget.trim()} style={{ width: "100%", background: appTeam && offerTarget.trim() ? accent : "rgba(255,255,255,0.06)", border: "none", borderRadius: 11, padding: "10px", color: appTeam && offerTarget.trim() ? "#08090f" : "#5c627e", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 12.5, cursor: appTeam && offerTarget.trim() ? "pointer" : "default" }}>Send alliance offer</button>
-            {offers.length ? <div style={{ marginTop: 9, display: "flex", flexDirection: "column", gap: 6 }}>{offers.slice(0, 4).map((offer) => <div key={offer.id} style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#cfd3e6", background: "#111320", borderRadius: 9, padding: "7px 9px" }}>{offer.fromTeam}: {offer.message}</div>)}</div> : null}
+            <button onClick={attemptSendOffer} disabled={!appTeam || !offerTarget.trim()} style={{ width: "100%", background: appTeam && offerTarget.trim() ? accent : "rgba(255,255,255,0.06)", border: "none", borderRadius: 11, padding: "10px", color: appTeam && offerTarget.trim() ? "#08090f" : "#5c627e", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 12.5, cursor: appTeam && offerTarget.trim() ? "pointer" : "default" }}>Send alliance offer</button>
+
+            {/* Dynamic status of offers this team has SENT */}
+            {sentOffers.length ? (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, color: "#9aa0bf", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Your offers · live status</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {sentOffers.map((offer) => {
+                    const meta = OFFER_STATUS_META[offer.status] ?? OFFER_STATUS_META.sent;
+                    return (
+                      <div key={offer.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "#111320", border: `1px solid ${meta.color}30`, borderRadius: 10, padding: "9px 11px" }}>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, color: "#e8eaf0", fontWeight: 700 }}>{offer.toTeam}</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "'Exo 2', sans-serif", fontSize: 11, fontWeight: 800, color: meta.color }}>
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: meta.color }} /> {meta.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {/* Incoming offers as organized notifications — only student accounts on
+              the team see and answer these, and only when notifications are on. */}
+          {isStudent && notifyOffers ? (
+            <div style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 13, padding: 12 }}>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: "#e8eaf0", marginBottom: 8 }}>Incoming alliance offers</p>
+              {offers.filter((o) => o.status === "sent").map((offer) => (
+                <div key={offer.id} style={{ background: "#111320", border: `1px solid ${accent}30`, borderRadius: 12, padding: 11, marginBottom: 8 }}>
+                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#e8eaf0", marginBottom: offer.message ? 3 : 8 }}>
+                    <strong style={{ color: accent }}>{offer.fromTeam}</strong> wants to alliance with you
+                  </p>
+                  {offer.message ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf", marginBottom: 9, lineHeight: 1.4 }}>“{offer.message}”</p> : null}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    {([["accepted", "Accept", "#10b981"], ["declined", "Decline", "#ff6b7a"], ["thinking", "Think about it", "#f59e0b"], ["meeting", "Meet up", "#38bdf8"]] as const).map(([resp, label, col]) => (
+                      <button key={resp} disabled={offerBusyId === offer.id} onClick={() => respondOffer(offer, resp)} style={{ background: `${col}18`, border: `1px solid ${col}45`, color: col, borderRadius: 9, padding: "9px 6px", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, cursor: offerBusyId === offer.id ? "default" : "pointer", opacity: offerBusyId === offer.id ? 0.5 : 1 }}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {offers.filter((o) => o.status !== "sent").map((offer) => {
+                const meta = OFFER_STATUS_META[offer.status] ?? OFFER_STATUS_META.sent;
+                return (
+                  <div key={offer.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "#111320", borderRadius: 9, padding: "8px 10px", marginBottom: 6 }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11.5, color: "#cfd3e6" }}>{offer.fromTeam}</span>
+                    <span style={{ fontFamily: "'Exo 2', sans-serif", fontSize: 10.5, fontWeight: 800, color: meta.color }}>You: {meta.label}</span>
+                  </div>
+                );
+              })}
+              {!offers.length ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#7a80a0" }}>No incoming offers yet. Teams can reach you here near alliance selection.</p> : null}
+            </div>
+          ) : null}
+
+          {/* Opt-out toggle — students can silence offer notifications */}
+          {isStudent ? (
+            <button onClick={() => toggleNotifyOffers(!notifyOffers)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 11, padding: "10px 12px", cursor: "pointer" }}>
+              <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#cfd3e6" }}>Alliance offer notifications</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 34, height: 18, borderRadius: 999, background: notifyOffers ? "#10b981" : "rgba(255,255,255,0.14)", position: "relative", transition: "0.2s" }}>
+                  <span style={{ position: "absolute", top: 2, left: notifyOffers ? 18 : 2, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "0.2s" }} />
+                </span>
+                <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11, color: notifyOffers ? "#10b981" : "#7a80a0" }}>{notifyOffers ? "ON" : "OFF"}</span>
+              </span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {disclaimerOpen ? (
+        <div onClick={() => setDisclaimerOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(4,5,12,0.72)", backdropFilter: "blur(6px)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 402, background: "#0d0f1c", borderRadius: 22, border: `1px solid ${accent}35`, padding: "20px 18px", boxShadow: "0 18px 60px rgba(0,0,0,0.5)" }}>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 17, color: "#e8eaf0", marginBottom: 8 }}>Before you send an alliance offer</p>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#cfd3e6", lineHeight: 1.55, display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+              <p>This feature is a convenience and <strong>might not work</strong>. It only reaches a team if that team uses MatchMind and is registered for this event.</p>
+              <p>Anything agreed here — including an accepted offer — is <strong>unofficial</strong> and can change. Only the real, in-person alliance selection run by the event is binding.</p>
+              <p>Offers open 30 minutes before alliance selection. Be respectful; messages are filtered and tied to your account.</p>
+            </div>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 9, marginBottom: 14, cursor: "pointer" }}>
+              <input type="checkbox" checked={disclaimerRead} onChange={(e) => setDisclaimerRead(e.target.checked)} style={{ marginTop: 2, width: 17, height: 17, accentColor: accent, flexShrink: 0 }} />
+              <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#cfd3e6", lineHeight: 1.45 }}>I have read and understand these terms.</span>
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button onClick={() => setDisclaimerOpen(false)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+              <button onClick={agreeDisclaimerAndSend} disabled={!disclaimerRead} style={{ background: disclaimerRead ? accent : "rgba(255,255,255,0.06)", border: "none", borderRadius: 12, padding: "12px", color: disclaimerRead ? "#08090f" : "#5c627e", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13, cursor: disclaimerRead ? "pointer" : "default" }}>Agree &amp; send</button>
+            </div>
           </div>
         </div>
       ) : null}
