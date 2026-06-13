@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "uicheck",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/tmp/mmb2/server.mjs"],
+      "port": 5500
     }
   ]
 }

@@ -108,7 +108,6 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
   const { profile, team, teams, role, language, teammates, signedIn, isGuest, setTeam, setTeams, setRole, setLanguage, updateProfile, addTeammate, removeTeammate, signOut, setOnboarded } = useApp();
   const [notifications, setNotifications] = useState(true);
   const [matchAlerts, setMatchAlerts] = useState(true);
-  const [autoSync, setAutoSync] = useState(true);
   const [dataSharing, setDataSharing] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showAvatar, setShowAvatar] = useState(false);
@@ -335,14 +334,6 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
 
         {/* Data & Sync */}
         <Section title="DATA & SYNC">
-          <SettingRow
-            icon={<Wifi size={16} style={{ color: "#10b981" }} />}
-            iconBg="#10b98115"
-            label="Auto Sync"
-            sub="Sync robot telemetry automatically"
-            right={<Toggle value={autoSync} onChange={setAutoSync} accent={accent} />}
-          />
-          <SectionDivider />
           <SettingRow
             icon={<Shield size={16} style={{ color: "#ff3b5c" }} />}
             iconBg="#ff3b5c15"

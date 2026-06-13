@@ -189,6 +189,13 @@ function teamSearchScore(team: RoboTeamResult, query: string) {
   if (number === compactQ) score = Math.max(score, 1000);
   else if (number.startsWith(compactQ)) score = Math.max(score, 860);
   else if (compactQ.length >= 2 && number.includes(compactQ)) score = Math.max(score, 650);
+  else {
+    // Same numeric family (e.g. searching 39333Z surfaces 39333V/39333W) but
+    // always BELOW an exact number match, so 39333Z ranks above 39333V.
+    const qDigits = compactQ.replace(/[^0-9]/g, "");
+    const nDigits = number.replace(/[^0-9]/g, "");
+    if (qDigits.length >= 3 && nDigits === qDigits) score = Math.max(score, 520);
+  }
 
   if (name === q) score = Math.max(score, 760);
   else if (name.startsWith(q)) score = Math.max(score, 690);
@@ -367,7 +374,7 @@ export type RoboEvent = {
   event_type?: string;
   divisions?: Array<{ id: number; name: string }>;
   season?: { id: number; name: string };
-  location?: { city?: string; region?: string; country?: string };
+  location?: { venue?: string; address_1?: string; address_2?: string; city?: string; region?: string; postcode?: string; country?: string };
   level?: string;
   program?: { code?: string; name?: string };
   grade?: string;
@@ -891,19 +898,34 @@ export function allianceCountForTeamCount(teamCount: number) {
   return Math.max(0, Math.floor(teamCount / 2));
 }
 
+// Probability (0-100) that `candidate` would ACCEPT an alliance invite from us.
+// Smooth and monotonic in the rank gap so every candidate gets a distinct,
+// realistic number instead of clamping to one value: a team ranked well below
+// us is eager to accept; a top-seed captain ranked far above us rarely would.
 export function inviteLikelihood(input: { ourRank?: number | null; candidateRank?: number | null; teamCount?: number; candidateAlreadyDeclined?: boolean }) {
   if (input.candidateAlreadyDeclined) return 0;
   const ourRank = input.ourRank ?? null;
   const candidateRank = input.candidateRank ?? null;
-  const allianceCount = allianceCountForTeamCount(input.teamCount ?? 0);
+  const teamCount = input.teamCount ?? 0;
   if (!ourRank || !candidateRank || ourRank > 999 || candidateRank > 999) return 50;
-  const likelyCaptain = allianceCount > 0 && candidateRank <= allianceCount;
-  const weCaptain = allianceCount > 0 && ourRank <= allianceCount;
-  if (likelyCaptain && candidateRank < ourRank) return Math.max(8, Math.min(42, 18 + (ourRank - candidateRank) * 2));
-  if (!weCaptain && likelyCaptain) return Math.max(5, Math.min(28, 16 - candidateRank));
-  const rankGap = candidateRank - ourRank;
-  if (rankGap >= 0) return Math.max(58, Math.min(94, 66 + rankGap * 1.7));
-  return Math.max(30, Math.min(62, 58 + rankGap * 4));
+
+  const allianceCount = allianceCountForTeamCount(teamCount);
+  const field = Math.max(8, teamCount || 24);
+  // gap > 0  -> candidate ranked BELOW us (worse seed) -> more likely to accept.
+  // gap < 0  -> candidate ranked ABOVE us (better seed) -> less likely.
+  const gap = ourRank - candidateRank;
+  const norm = Math.max(-1, Math.min(1, gap / (field * 0.6)));
+  let p = 50 - norm * 46;
+
+  // A likely captain (top alliances pick first) courted by a lower-ranked team
+  // is choosier; if WE are a captain, candidates below us are much more eager.
+  const candidateIsCaptain = allianceCount > 0 && candidateRank <= allianceCount;
+  const weAreCaptain = allianceCount > 0 && ourRank <= allianceCount;
+  if (candidateIsCaptain && gap < 0) p -= 9;          // strong seed, we're beneath them
+  if (weAreCaptain && gap > 0) p += 12;               // we can captain them
+  if (candidateRank <= 3 && ourRank > allianceCount) p -= 6; // very top seeds rarely drop far
+
+  return Math.round(Math.max(4, Math.min(96, p)));
 }
 
 export async function sendInviteEmail(input: { name: string; email: string; teamNumber?: string; senderName?: string }) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { Clock, MapPin, Sparkles } from "lucide-react";
 import { matchAlliances, matchLabel, type RoboMatch, type RoboRanking, type RoboTeamResult } from "../../services/api";
 import { predictMatch, recordOutcome } from "../../services/predictor";
@@ -47,12 +47,14 @@ export function MatchCard({
   highlightTeam,
   accent,
   onTeamClick,
+  headerAction,
 }: {
   match: RoboMatch;
   rankings?: RoboRanking[];
   highlightTeam?: string;
   accent: string;
   onTeamClick?: (teamNumber: string) => void;
+  headerAction?: ReactNode;
 }) {
   const { red, blue, redTeams, blueTeams } = matchAlliances(match);
   const redScore = Number(red?.score);
@@ -98,6 +100,7 @@ export function MatchCard({
         ) : (
           <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8.5, letterSpacing: "0.08em", color: "#9aa0bf", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "2px 6px" }}>UPCOMING</span>
         )}
+        {headerAction}
       </div>
 
       {cooperative ? (

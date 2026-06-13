@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical, Sparkles, MessageCircle } from "lucide-react";
+import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical, Sparkles } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
 import { MatchCard } from "../MatchCard";
@@ -108,6 +108,16 @@ function eventDateRange(event: RoboEvent) {
   return { start: safeStart, end: safeEnd };
 }
 
+// Full street address (venue + street + city/region/postcode/country) so the
+// calendar entry drops a pin on the ACTUAL venue, not just the city.
+function fullEventAddress(event: RoboEvent) {
+  const l = event.location ?? {};
+  const parts = [l.venue, l.address_1, l.address_2, [l.city, l.region].filter(Boolean).join(", "), l.postcode, l.country]
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean);
+  return parts.join(", ") || eventLoc(event);
+}
+
 function googleCalendarUrl(event: RoboEvent) {
   const { start, end } = eventDateRange(event);
   const fmt = (d: Date) => d.toISOString().replace(/[-:]|\.\d{3}/g, "");
@@ -115,7 +125,7 @@ function googleCalendarUrl(event: RoboEvent) {
     action: "TEMPLATE",
     text: event.name,
     dates: `${fmt(start)}/${fmt(end)}`,
-    location: eventLoc(event),
+    location: fullEventAddress(event),
     details: `MatchMind event: ${event.sku}`,
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
@@ -143,7 +153,7 @@ function downloadAppleCalendar(event: RoboEvent) {
     `DTSTART:${start.toISOString().replace(/[-:]|\.\d{3}/g, "")}`,
     `DTEND:${end.toISOString().replace(/[-:]|\.\d{3}/g, "")}`,
     `SUMMARY:${event.name.replace(/\n/g, " ")}`,
-    `LOCATION:${eventLoc(event).replace(/\n/g, " ")}`,
+    `LOCATION:${fullEventAddress(event).replace(/\n/g, " ").replace(/,/g, "\\,")}`,
     `DESCRIPTION:MatchMind event ${event.sku}`,
     "END:VEVENT",
     "END:VCALENDAR",
@@ -194,6 +204,33 @@ function schoolYear(value?: string | null) {
 
 function mostRecentSchoolYear(events: RoboEvent[]) {
   return events.map((e) => schoolYear(e.start)).filter(Boolean).sort().reverse()[0] ?? "";
+}
+
+// Pull the actual game name (e.g. "High Stakes", "Push Back", "Rapid Relay")
+// out of the official RobotEvents season string for the team's program, so the
+// year picker shows the game the team played — never a hard-coded guess.
+function seasonGameLabel(seasonName?: string): string {
+  if (!seasonName) return "";
+  const game = seasonName
+    .replace(/\d{4}\s*[-–]\s*\d{2,4}/g, "")
+    .replace(/VEX\s*(V5RC|VIQRC|VURC|VAIRC|V5|IQ|U|AI)?\s*(Robotics Competition|Robotics|Competition)/gi, "")
+    .replace(/\b(V5RC|VIQRC|VURC|VRC|VAIRC|VEX U|VEXU)\b/gi, "")
+    .replace(/[:\-–]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return game;
+}
+
+// schoolYear -> official game name, built from the team's real events.
+function yearGameMap(events: RoboEvent[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const ev of events) {
+    const y = schoolYear(ev.start);
+    if (!y) continue;
+    const game = seasonGameLabel(ev.season?.name);
+    if (game && !map[y]) map[y] = game;
+  }
+  return map;
 }
 
 function teamLine(team: RoboTeamResult, reverse = false) {
@@ -508,6 +545,7 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
   const [noteDraft, setNoteDraft] = useState("");
   const awardsRef = useRef<HTMLDivElement | null>(null);
   const years = useMemo(() => Array.from(new Set(profile.events.map((e) => schoolYear(e.start)).filter(Boolean))).sort().reverse(), [profile.events]);
+  const yearGames = useMemo(() => yearGameMap(profile.events), [profile.events]);
   const eventIdsForYear = useMemo(() => new Set(profile.events.filter((e) => !selectedYear || schoolYear(e.start) === selectedYear).map((e) => e.id)), [profile.events, selectedYear]);
   const filteredEvents = useMemo(() => profile.events.filter((e) => !selectedYear || schoolYear(e.start) === selectedYear), [profile.events, selectedYear]);
   const filteredMatches = useMemo(() => profile.matches.filter((m) => {
@@ -587,8 +625,8 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
         </button>
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: "16px", color: "#e8eaf0", flex: 1 }}>Team Profile</p>
         {years.length ? (
-          <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} style={{ background: "#181c2e", border: `1px solid ${accent}35`, borderRadius: 10, color: "#e8eaf0", fontFamily: "'JetBrains Mono', monospace", fontSize: 10, padding: "7px 8px", outline: "none" }}>
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} style={{ appearance: "none", WebkitAppearance: "none", background: `linear-gradient(135deg, ${accent}18, #181c2e)`, border: `1px solid ${accent}45`, borderRadius: 11, color: "#e8eaf0", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, padding: "8px 26px 8px 11px", outline: "none", cursor: "pointer", backgroundImage: `linear-gradient(135deg, ${accent}18, #181c2e), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23${accent.replace('#', '')}' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 10px center" }}>
+            {years.map((y) => <option key={y} value={y} style={{ background: "#181c2e", color: "#e8eaf0" }}>{yearGames[y] ? `${yearGames[y]} · ${y}` : y}</option>)}
           </select>
         ) : loading ? <Loader2 size={17} style={{ color: accent, animation: "spin 1s linear infinite" }} /> : null}
       </div>
@@ -729,12 +767,17 @@ function TeamDetail({ seed, accent, onBack, onEventClick }: { seed: RoboTeamResu
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 13, color: "#e8eaf0", marginBottom: 10 }}>Match History</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {filteredMatches.map((m) => (
-            <div key={m.id} style={{ position: "relative" }}>
-              <MatchCard match={m} highlightTeam={seed.number} accent={accent} />
-              <button onClick={() => setMatchNoteTarget(m)} aria-label={`Scout ${matchLabel(m)}`} style={{ position: "absolute", top: 7, right: 8, width: 26, height: 26, borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                <MoreVertical size={13} style={{ color: "#9aa0bf" }} />
-              </button>
-            </div>
+            <MatchCard
+              key={m.id}
+              match={m}
+              highlightTeam={seed.number}
+              accent={accent}
+              headerAction={(
+                <button onClick={() => setMatchNoteTarget(m)} aria-label={`Scout ${matchLabel(m)}`} style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 7, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                  <MoreVertical size={13} style={{ color: "#9aa0bf" }} />
+                </button>
+              )}
+            />
           ))}
           {!filteredMatches.length ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#7a80a0" }}>No matches returned by RobotEvents for this school year.</p> : null}
         </div>
@@ -781,7 +824,7 @@ function awardQualificationText(a: RoboAward) {
   return `Qualifies for: ${qualifications.join(", ")}`;
 }
 
-function EventDetail({ event, accent, onBack, onTeamClick, onOpenEventChat }: { event: RoboEvent; accent: string; onBack: () => void; onTeamClick: (team: RoboTeamResult) => void; onOpenEventChat?: (event: RoboEvent) => void }) {
+function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent; accent: string; onBack: () => void; onTeamClick: (team: RoboTeamResult) => void }) {
   const { addScoutNote, team: appTeam, profile: userProfile } = useApp();
   const [profile, setProfile] = useState<EventProfile>({ event, teams: [], matches: [], awards: [], rankings: [], skills: [] });
   const [evTab, setEvTab] = useState<"teams" | "matches" | "rankings" | "skills" | "awards">("matches");
@@ -935,9 +978,6 @@ function EventDetail({ event, accent, onBack, onTeamClick, onOpenEventChat }: { 
           <ArrowLeft size={16} style={{ color: "#e8eaf0" }} />
         </button>
         <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: "15px", color: "#e8eaf0", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.name}</p>
-        <button aria-label="Open event chat" onClick={() => onOpenEventChat?.(event)} style={{ background: `${accent}14`, border: `1px solid ${accent}32`, borderRadius: 10, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
-          <MessageCircle size={16} style={{ color: accent }} />
-        </button>
         {loading ? <Loader2 size={17} style={{ color: accent, animation: "spin 1s linear infinite" }} /> : null}
       </div>
 
@@ -964,7 +1004,7 @@ function EventDetail({ event, accent, onBack, onTeamClick, onOpenEventChat }: { 
           <button onClick={() => setExportOpen(true)} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 11, padding: "9px 8px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, cursor: "pointer" }}>Export</button>
         </div>
         <button onClick={() => setEventPanelOpen((open) => !open)} style={{ width: "100%", marginTop: 8, background: eventPanelOpen ? `${accent}16` : "rgba(255,255,255,0.04)", border: `1px solid ${eventPanelOpen ? accent + "38" : "rgba(255,255,255,0.08)"}`, borderRadius: 12, padding: "10px 12px", color: eventPanelOpen ? accent : "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
-          Tournament chat, MatchMind teams, and alliance offers
+          MatchMind teams &amp; alliance offers
         </button>
       </div>
 
@@ -973,37 +1013,20 @@ function EventDetail({ event, accent, onBack, onTeamClick, onOpenEventChat }: { 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div>
               <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, color: "#e8eaf0" }}>Tournament Community</p>
-              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf", lineHeight: 1.4 }}>Optional event chat opens 2 days before and closes 12 hours after. Only first names and team numbers show.</p>
+              <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf", lineHeight: 1.4 }}>See which teams at this event run MatchMind, and send private alliance offers near selection. Only first names and team numbers show.</p>
             </div>
-            <button onClick={joinChat} style={{ flexShrink: 0, background: accent, border: "none", borderRadius: 11, padding: "9px 11px", color: "#08090f", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 11.5, cursor: "pointer" }}>Join</button>
           </div>
           {eventBackendStatus ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: eventBackendStatus.includes("blocked") || eventBackendStatus.includes("failed") || eventBackendStatus.includes("Could not") ? "#ff6b7a" : "#9aa0bf", lineHeight: 1.45 }}>{eventBackendStatus}</p> : null}
           <div style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 13, padding: 12 }}>
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: "#e8eaf0", marginBottom: 8 }}>Teams using MatchMind</p>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {matchMindTeams.slice(0, 30).map((row) => <span key={row.teamNumber} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: accent, background: `${accent}12`, border: `1px solid ${accent}25`, borderRadius: 999, padding: "4px 8px" }}>{row.teamNumber}</span>)}
-              {!matchMindTeams.length ? <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#7a80a0" }}>No teams have joined this event chat yet.</span> : null}
-            </div>
-          </div>
-          <div style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 13, padding: 12 }}>
-            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: "#e8eaf0", marginBottom: 8 }}>Event chat</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, maxHeight: 180, overflowY: "auto", scrollbarWidth: "none", marginBottom: 9 }}>
-              {(chatSnapshot?.messages ?? []).slice(-20).map((message) => (
-                <div key={message.id} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 11, padding: "8px 10px" }}>
-                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9.5, color: accent }}>{message.firstName} · {message.teamNumber}</p>
-                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#cfd3e6", lineHeight: 1.45, marginTop: 3 }}>{message.body}</p>
-                </div>
-              ))}
-              {!chatSnapshot?.messages?.length ? <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#7a80a0" }}>Join to start the tournament chat.</p> : null}
-            </div>
-            <div style={{ display: "flex", gap: 7 }}>
-              <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Message event chat..." style={{ flex: 1, minWidth: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#e8eaf0", padding: "9px 10px", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 12.5 }} />
-              <button onClick={sendEventMessage} disabled={!chatInput.trim()} style={{ background: chatInput.trim() ? accent : "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, padding: "0 12px", color: chatInput.trim() ? "#08090f" : "#5c627e", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 12, cursor: chatInput.trim() ? "pointer" : "default" }}>Send</button>
+              {!matchMindTeams.length ? <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#7a80a0" }}>No MatchMind teams registered at this event yet.</span> : null}
             </div>
           </div>
           <div style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 13, padding: 12 }}>
             <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12.5, color: "#e8eaf0", marginBottom: 4 }}>Alliance offers</p>
-            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9aa0bf", lineHeight: 1.4, marginBottom: 9 }}>Offers unlock one hour before alliance selection. Event settings can override the exact alliance-selection time.</p>
+            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9aa0bf", lineHeight: 1.4, marginBottom: 9 }}>Offers unlock 30 minutes before alliance selection and only reach teams registered on MatchMind. Accepting an offer here is unofficial and can change at the real selection.</p>
             <div style={{ display: "grid", gridTemplateColumns: "0.7fr 1fr", gap: 7, marginBottom: 7 }}>
               <input value={offerTarget} onChange={(e) => setOfferTarget(e.target.value)} placeholder="Team" style={{ minWidth: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#e8eaf0", padding: "9px 10px", outline: "none", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }} />
               <input value={offerMessage} onChange={(e) => setOfferMessage(e.target.value)} placeholder="Short offer note" style={{ minWidth: 0, background: "#111320", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, color: "#e8eaf0", padding: "9px 10px", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 12.5 }} />
@@ -1284,14 +1307,6 @@ export function LookupPage({ resetKey = 0, onNavigate }: { resetKey?: number; on
     });
   }, [eventResults, dateWindow]);
 
-  // The messages page was removed, so the tournament group chat now lives
-  // inside the event detail. Opening "event chat" just opens that event and
-  // flags it so the detail view scrolls to the chat section.
-  function openEventChat(event: RoboEvent) {
-    saveEventChatIntent(event);
-    setSelectedEvent(event);
-  }
-
   useEffect(() => {
     let alive = true;
     const q = query.trim();
@@ -1345,7 +1360,7 @@ export function LookupPage({ resetKey = 0, onNavigate }: { resetKey?: number; on
   if (selectedEvent) {
     return (
       <div style={{ height: "100dvh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <EventDetail event={selectedEvent} accent={accent} onBack={() => setSelectedEvent(null)} onTeamClick={(t) => { setSelectedEvent(null); setSelectedTeam(t); }} onOpenEventChat={openEventChat} />
+        <EventDetail event={selectedEvent} accent={accent} onBack={() => setSelectedEvent(null)} onTeamClick={(t) => { setSelectedEvent(null); setSelectedTeam(t); }} />
       </div>
     );
   }
@@ -1454,13 +1469,6 @@ export function LookupPage({ resetKey = 0, onNavigate }: { resetKey?: number; on
                 style={{ background: "transparent", border: "none", padding: 2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
               >
                 <Star size={15} style={{ color: isFavorite("event", ev.sku || ev.name) ? "#f59e0b" : "rgba(255,255,255,0.18)", fill: isFavorite("event", ev.sku || ev.name) ? "#f59e0b" : "none" }} />
-              </button>
-              <button
-                aria-label="Open event chat"
-                onClick={(e) => { e.stopPropagation(); openEventChat(ev); }}
-                style={{ background: `${accent}12`, border: `1px solid ${accent}28`, borderRadius: 9, width: 30, height: 30, padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
-              >
-                <MessageCircle size={14} style={{ color: accent }} />
               </button>
               <ChevronRight size={16} style={{ color: "rgba(255,255,255,0.2)" }} />
             </div>
