@@ -3,6 +3,9 @@ import { ArrowLeft, Sparkles, Loader2, Trophy, Send, Users, ChevronDown } from "
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
 import { allianceCountForTeamCount, askCoach, eventMatches, eventRankings, eventSkills, eventTeams, inviteLikelihood, matchAlliances, teamEvents, teamMatches, type RoboEvent, type RoboRanking, type RoboSkills, type RoboMatch, type RoboTeamResult } from "../../../services/api";
+import { registerForAllianceOffers, sendAllianceOffer } from "../../../services/firebaseBackend";
+
+const ALLIANCE_DISCLAIMER_KEY = "matchmind:alliance-disclaimer-agreed";
 
 type Msg = { role: "user" | "ai"; text: string };
 
@@ -50,7 +53,7 @@ function historySummary(matches: RoboMatch[], number: string) {
 
 export function AlliancePage({ onBack }: { onBack: () => void }) {
   const { accent } = useAccent();
-  const { team } = useApp();
+  const { team, role, profile } = useApp();
   const [events, setEvents] = useState<RoboEvent[]>([]);
   const [eventId, setEventId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -66,6 +69,41 @@ export function AlliancePage({ onBack }: { onBack: () => void }) {
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const selectedEvent = useMemo(() => events.find((e) => e.id === eventId), [events, eventId]);
+  const [offerState, setOfferState] = useState<Record<string, "sending" | "sent" | "error">>({});
+  const [disclaimerTarget, setDisclaimerTarget] = useState<string | null>(null);
+  const [disclaimerRead, setDisclaimerRead] = useState(false);
+
+  // Register this user + team for the selected event so alliance offers can flow
+  // both ways from the AI selector too.
+  useEffect(() => {
+    if (!team || !eventId) return;
+    registerForAllianceOffers({ eventId, teamNumber: team.number, role: role ?? "student", displayName: profile?.name }).catch(() => { /* backend optional */ });
+  }, [eventId, profile?.name, role, team]);
+
+  async function doSendOfferTo(toTeam: string) {
+    if (!team || !eventId) return;
+    setOfferState((s) => ({ ...s, [toTeam]: "sending" }));
+    try {
+      await sendAllianceOffer({ eventId, fromTeam: team.number, toTeam, message: `${team.number} would like to alliance with you.` });
+      setOfferState((s) => ({ ...s, [toTeam]: "sent" }));
+    } catch {
+      setOfferState((s) => ({ ...s, [toTeam]: "error" }));
+    }
+  }
+
+  function offerTo(toTeam: string) {
+    let agreed = false;
+    try { agreed = window.localStorage.getItem(ALLIANCE_DISCLAIMER_KEY) === "yes"; } catch { /* ignore */ }
+    if (!agreed) { setDisclaimerRead(false); setDisclaimerTarget(toTeam); return; }
+    void doSendOfferTo(toTeam);
+  }
+
+  function agreeAndSend() {
+    try { window.localStorage.setItem(ALLIANCE_DISCLAIMER_KEY, "yes"); } catch { /* ignore */ }
+    const target = disclaimerTarget;
+    setDisclaimerTarget(null);
+    if (target) void doSendOfferTo(target);
+  }
 
   async function buildHistories(sourceRankings: RoboRanking[], sourceTeams: RoboTeamResult[]) {
     const candidates = sourceRankings
@@ -250,6 +288,14 @@ Format with a clear numbered list and bold team numbers. Do not show confidence.
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#f59e0b" }}>Skills {row.skill?.score ?? "—"}</span>
                     </div>
                     <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf", lineHeight: 1.45, marginTop: 6 }}>Partner match blends rank, skills, record, and acceptance odds. Rank #{row.ranking.rank ?? "—"} with {row.ranking.wins ?? 0}-{row.ranking.losses ?? 0} record. {histories[row.number] ? `3-year: ${histories[row.number]}.` : "History loading from RobotEvents."}</p>
+                    <button
+                      onClick={() => offerTo(row.number)}
+                      disabled={offerState[row.number] === "sending" || offerState[row.number] === "sent"}
+                      style={{ marginTop: 9, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: offerState[row.number] === "sent" ? "#10b98118" : `${accent}16`, border: `1px solid ${offerState[row.number] === "sent" ? "#10b98140" : accent + "40"}`, borderRadius: 11, padding: "9px", color: offerState[row.number] === "sent" ? "#10b981" : accent, fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12, cursor: offerState[row.number] === "sending" || offerState[row.number] === "sent" ? "default" : "pointer" }}
+                    >
+                      <Send size={13} />
+                      {offerState[row.number] === "sending" ? "Sending…" : offerState[row.number] === "sent" ? "Offer sent" : offerState[row.number] === "error" ? "Failed — tap to retry" : "Send alliance offer"}
+                    </button>
                   </div>
                 ))}
               </div>
@@ -284,6 +330,26 @@ Format with a clear numbered list and bold team numbers. Do not show confidence.
           <div style={{ display: "flex", gap: 8, background: "#181c2e", border: `1px solid ${accent}25`, borderRadius: 16, padding: "6px 6px 6px 14px", alignItems: "center" }}>
             <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && discuss()} placeholder="Discuss the picks…" style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#e8eaf0", fontFamily: "'Inter', sans-serif", fontSize: 13 }} />
             <button onClick={discuss} disabled={!input.trim() || generating} style={{ width: 36, height: 36, borderRadius: 10, background: input.trim() && !generating ? accent : "rgba(255,255,255,0.06)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: input.trim() ? "pointer" : "default", flexShrink: 0 }}><Send size={15} style={{ color: input.trim() && !generating ? "#08090f" : "#5c627e" }} /></button>
+          </div>
+        </div>
+      ) : null}
+      {disclaimerTarget ? (
+        <div onClick={() => setDisclaimerTarget(null)} style={{ position: "fixed", inset: 0, background: "rgba(4,5,12,0.72)", backdropFilter: "blur(6px)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 402, background: "#0d0f1c", borderRadius: 22, border: `1px solid ${accent}35`, padding: "20px 18px", boxShadow: "0 18px 60px rgba(0,0,0,0.5)" }}>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 17, color: "#e8eaf0", marginBottom: 8 }}>Before you send an alliance offer</p>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#cfd3e6", lineHeight: 1.55, display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+              <p>This feature is a convenience and <strong>might not work</strong>. It only reaches a team if that team uses MatchMind and is registered for this event.</p>
+              <p>Anything agreed here — including an accepted offer — is <strong>unofficial</strong> and can change. Only the real, in-person alliance selection run by the event is binding.</p>
+              <p>Offers open 30 minutes before alliance selection. Only student accounts on the recipient team are notified.</p>
+            </div>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 9, marginBottom: 14, cursor: "pointer" }}>
+              <input type="checkbox" checked={disclaimerRead} onChange={(e) => setDisclaimerRead(e.target.checked)} style={{ marginTop: 2, width: 17, height: 17, accentColor: accent, flexShrink: 0 }} />
+              <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#cfd3e6", lineHeight: 1.45 }}>I have read and understand these terms.</span>
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button onClick={() => setDisclaimerTarget(null)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px", color: "#cfd3e6", fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+              <button onClick={agreeAndSend} disabled={!disclaimerRead} style={{ background: disclaimerRead ? accent : "rgba(255,255,255,0.06)", border: "none", borderRadius: 12, padding: "12px", color: disclaimerRead ? "#08090f" : "#5c627e", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13, cursor: disclaimerRead ? "pointer" : "default" }}>Agree &amp; send</button>
+            </div>
           </div>
         </div>
       ) : null}
