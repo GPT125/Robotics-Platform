@@ -4,7 +4,7 @@ import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
 import { MatchCard } from "../MatchCard";
 import { useApp, type Favorite, type RoboTeam, type ScoutNote } from "../AppContext";
-import { getMatchMindEventTeams, getTournamentChat, joinTournamentChat, listAllianceOffers, sendAllianceOffer, sendTournamentMessage, type TournamentChatSnapshot, type AllianceOffer } from "../../../services/firebaseBackend";
+import { getMatchMindEventTeams, listAllianceOffers, sendAllianceOffer, type AllianceOffer } from "../../../services/firebaseBackend";
 import {
   allianceTeams,
   awardWinnerTeams,
@@ -71,21 +71,6 @@ function loc(team: RoboTeamResult) {
 
 function eventLoc(event: RoboEvent) {
   return [event.location?.city, event.location?.region].filter(Boolean).join(", ") || event.location?.country || "Location TBD";
-}
-
-const EVENT_CHAT_INTENT_KEY = "matchmind:event-chat-intent";
-
-function saveEventChatIntent(event: RoboEvent) {
-  const intent = {
-    id: event.id,
-    name: event.name,
-    sku: event.sku,
-    start: event.start,
-    end: event.end,
-    location: eventLoc(event),
-    program: event.program?.code ?? event.sku?.split("-")[0],
-  };
-  window.sessionStorage.setItem(EVENT_CHAT_INTENT_KEY, JSON.stringify(intent));
 }
 
 function eventLivestreamUrl(event: RoboEvent) {
@@ -825,7 +810,7 @@ function awardQualificationText(a: RoboAward) {
 }
 
 function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent; accent: string; onBack: () => void; onTeamClick: (team: RoboTeamResult) => void }) {
-  const { addScoutNote, team: appTeam, profile: userProfile } = useApp();
+  const { addScoutNote, team: appTeam } = useApp();
   const [profile, setProfile] = useState<EventProfile>({ event, teams: [], matches: [], awards: [], rankings: [], skills: [] });
   const [evTab, setEvTab] = useState<"teams" | "matches" | "rankings" | "skills" | "awards">("matches");
   const [metricSort, setMetricSort] = useState<"rank" | "opr" | "dpr" | "ccwm">("rank");
@@ -835,8 +820,6 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSections, setExportSections] = useState({ teams: true, matches: true, rankings: true, analytics: true, skills: true, awards: true });
   const [eventPanelOpen, setEventPanelOpen] = useState(false);
-  const [chatSnapshot, setChatSnapshot] = useState<TournamentChatSnapshot | null>(null);
-  const [chatInput, setChatInput] = useState("");
   const [eventBackendStatus, setEventBackendStatus] = useState("");
   const [matchMindTeams, setMatchMindTeams] = useState<Array<{ teamNumber: string }>>([]);
   const [offerTarget, setOfferTarget] = useState("");
@@ -993,48 +976,15 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
     let alive = true;
     if (!eventPanelOpen) return;
     Promise.all([
-      getTournamentChat(event.id).catch(() => null),
       getMatchMindEventTeams(event.id).catch(() => ({ teams: [] })),
       appTeam ? listAllianceOffers(event.id, appTeam.number).catch(() => ({ offers: [] })) : Promise.resolve({ offers: [] }),
-    ]).then(([chat, teams, eventOffers]) => {
+    ]).then(([teams, eventOffers]) => {
       if (!alive) return;
-      setChatSnapshot(chat);
       setMatchMindTeams(teams?.teams ?? []);
       setOffers(eventOffers.offers ?? []);
     });
     return () => { alive = false; };
   }, [appTeam, event.id, eventPanelOpen]);
-
-  async function joinChat() {
-    if (!appTeam) {
-      setEventBackendStatus("Select your team before joining tournament chat.");
-      return;
-    }
-    try {
-      setEventBackendStatus("Joining event chat...");
-      await joinTournamentChat({ eventId: event.id, displayName: userProfile?.name || appTeam.number, teamNumber: appTeam.number, program: appTeam.program?.code ?? event.program?.code });
-      const [chat, teams] = await Promise.all([getTournamentChat(event.id), getMatchMindEventTeams(event.id)]);
-      setChatSnapshot(chat);
-      setMatchMindTeams(teams.teams);
-      setEventBackendStatus("Joined. Messages show first name and team number only.");
-    } catch (error) {
-      setEventBackendStatus(error instanceof Error ? error.message : "Could not join event chat yet.");
-    }
-  }
-
-  async function sendEventMessage() {
-    const body = chatInput.trim();
-    if (!body) return;
-    try {
-      setEventBackendStatus("Sending...");
-      await sendTournamentMessage({ eventId: event.id, body });
-      setChatInput("");
-      setChatSnapshot(await getTournamentChat(event.id));
-      setEventBackendStatus("Sent.");
-    } catch (error) {
-      setEventBackendStatus(error instanceof Error ? error.message : "Message blocked or failed.");
-    }
-  }
 
   async function sendOffer() {
     if (!appTeam || !offerTarget.trim()) return;
