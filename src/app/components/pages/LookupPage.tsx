@@ -844,7 +844,18 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
   const [offers, setOffers] = useState<AllianceOffer[]>([]);
   const analytics = useMemo(() => eventAnalytics(profile), [profile.matches, profile.teams]);
   const livestreamUrl = useMemo(() => eventLivestreamUrl(event), [event]);
-  const eventDays = useMemo(() => eventDayKeys(event), [event.end, event.start]);
+  // Day tabs come from the days that ACTUALLY have matches (derived from each
+  // match's own date), so we never show empty days and every match lands under
+  // the correct date. Falls back to the event's calendar range only when no
+  // match carries a usable date.
+  const eventDays = useMemo(() => {
+    const keys = new Set<string>();
+    for (const m of profile.matches) {
+      const k = dateKey(m.scheduled ?? m.started ?? "");
+      if (k) keys.add(k);
+    }
+    return keys.size ? [...keys].sort() : eventDayKeys(event);
+  }, [profile.matches, event.end, event.start]);
   const hasDatedMatches = useMemo(() => profile.matches.some((m) => dateKey(m.scheduled ?? m.started ?? "")), [profile.matches]);
   const showDaySlider = eventDays.length > 1 && hasDatedMatches;
   const displayedMatches = useMemo(() => {
@@ -881,17 +892,84 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
   }, [event.event_type, event.level, profile.awards]);
 
   function exportEventData() {
-    const payload = {
-      event,
-      exportedAt: new Date().toISOString(),
-      teams: exportSections.teams ? profile.teams : undefined,
-      matches: exportSections.matches ? profile.matches : undefined,
-      rankings: exportSections.rankings ? profile.rankings : undefined,
-      oprDprCcwm: exportSections.analytics ? Object.fromEntries(analytics) : undefined,
-      skills: exportSections.skills ? profile.skills : undefined,
-      awards: exportSections.awards ? profile.awards : undefined,
-    };
-    downloadTextFile(`${event.sku || "matchmind-event"}-export.json`, JSON.stringify(payload, null, 2), "application/json");
+    const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const table = (head: string[], rows: string[][]) =>
+      `<table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${
+        rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")
+      }</tbody></table>`;
+    const sections: string[] = [];
+
+    if (exportSections.teams && profile.teams.length) {
+      sections.push(`<h2>Teams · ${profile.teams.length}</h2>` + table(
+        ["#", "Team", "Organization", "Location"],
+        profile.teams.map((t) => [esc(t.number), esc(t.team_name), esc(t.organization), esc([t.location?.city, t.location?.region].filter(Boolean).join(", "))]),
+      ));
+    }
+    if (exportSections.rankings && rankingRows.length) {
+      sections.push(`<h2>Rankings</h2>` + table(
+        ["Rank", "Team", "OPR", "DPR", "CCWM"],
+        rankingRows.map((row) => [esc(rankFor(row.ranking)), esc(row.number), row.opr.toFixed(1), row.dpr.toFixed(1), row.ccwm.toFixed(1)]),
+      ));
+    }
+    if (exportSections.matches && profile.matches.length) {
+      sections.push(`<h2>Matches · ${profile.matches.length}</h2>` + table(
+        ["Match", "Red", "Blue", "Score"],
+        profile.matches.map((m) => {
+          const model = matchDisplayModel(m);
+          const red = model.format === "head_to_head" ? model.redTeams.map((t) => t.number) : (model.alliances[0]?.teams ?? []).map((t) => t.number);
+          const blue = model.format === "head_to_head" ? model.blueTeams.map((t) => t.number) : (model.alliances[1]?.teams ?? []).map((t) => t.number);
+          const score = model.red?.score != null && model.blue?.score != null ? `${model.red.score}–${model.blue.score}` : "—";
+          return [esc(matchLabel(m)), esc(red.join(", ")), esc(blue.join(", ")), esc(score)];
+        }),
+      ));
+    }
+    if (exportSections.skills && skillRows.length) {
+      sections.push(`<h2>Skills</h2>` + table(
+        ["Rank", "Team", "Score"],
+        skillRows.map((s) => [esc(s.rank ?? "—"), esc(skillTeamNumber(s)), esc(s.score ?? "—")]),
+      ));
+    }
+    if (exportSections.awards && profile.awards.length) {
+      sections.push(`<h2>Awards · ${profile.awards.length}</h2>` + table(
+        ["Award", "Winner(s)"],
+        profile.awards.map((a) => [esc(a.title ?? a.name ?? "Award"), esc(awardWinnerTeams(a).map((t) => t.number).join(", "))]),
+      ));
+    }
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(event.name)} — MatchMind</title><style>
+  @page { margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #11131c; margin: 0; }
+  .hd { border-bottom: 3px solid ${accent}; padding-bottom: 10px; margin-bottom: 16px; }
+  .hd .brand { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: ${accent}; font-weight: 800; }
+  h1 { font-size: 21px; margin: 4px 0 2px; }
+  .meta { font-size: 11px; color: #5a607a; }
+  h2 { font-size: 13px; margin: 20px 0 7px; color: ${accent}; border-left: 4px solid ${accent}; padding-left: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+  th { text-align: left; background: #f3f4f9; padding: 5px 7px; border-bottom: 2px solid #e2e4ee; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: #5a607a; }
+  td { padding: 4px 7px; border-bottom: 1px solid #eef0f6; }
+  tr { break-inside: avoid; }
+  .ft { margin-top: 22px; font-size: 9px; color: #9aa0b8; text-align: center; }
+</style></head><body>
+  <div class="hd"><div class="brand">MatchMind Event Report</div>
+  <h1>${esc(event.name)}</h1>
+  <div class="meta">${esc([event.sku, eventLoc(event)].filter(Boolean).join(" · "))} · Exported ${esc(new Date().toLocaleString())}</div></div>
+  ${sections.join("") || "<p>No sections selected.</p>"}
+  <div class="ft">Generated by MatchMind · Unofficial data from RobotEvents</div>
+</body></html>`;
+
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    Object.assign(iframe.style, { position: "fixed", right: "0", bottom: "0", width: "0", height: "0", border: "0", opacity: "0" });
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow?.document;
+    if (!doc) { document.body.removeChild(iframe); return; }
+    doc.open(); doc.write(html); doc.close();
+    window.setTimeout(() => {
+      try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch { /* ignore */ }
+      window.setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* ignore */ } }, 1500);
+    }, 350);
     setExportOpen(false);
   }
 

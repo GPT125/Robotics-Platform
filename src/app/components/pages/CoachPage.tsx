@@ -185,6 +185,11 @@ export function CoachPage() {
   const [processing, setProcessing] = useState(false);
   const [listening, setListening] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const WAVE_BARS = 42;
+  const [levels, setLevels] = useState<number[]>(() => Array(WAVE_BARS).fill(0.12));
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const waveRafRef = useRef<number | null>(null);
   const [robotEventsData, setRobotEventsData] = useState<{ events: RoboEvent[]; matches: RoboMatch[]; awards: RoboAward[] }>({ events: [], matches: [], awards: [] });
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -215,6 +220,7 @@ export function CoachPage() {
     manualStopRef.current = true;
     if (voiceRestartTimerRef.current) window.clearTimeout(voiceRestartTimerRef.current);
     if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
+    stopWaveform();
     stopMicStream();
     try { recognitionRef.current?.stop(); } catch { /* ignore */ }
     try { if (mediaRecorderRef.current?.state !== "inactive") mediaRecorderRef.current?.stop(); } catch { /* ignore */ }
@@ -405,6 +411,47 @@ export function CoachPage() {
     mediaStreamRef.current = null;
   }
 
+  // Drive the recording bars from the REAL microphone signal so the waveform
+  // reflects the actual sound. Defensive: any failure just leaves the idle bars.
+  function startWaveform(stream: MediaStream) {
+    try {
+      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.78;
+      source.connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+      const bins = analyser.frequencyBinCount;
+      const data = new Uint8Array(bins);
+      const tick = () => {
+        const a = analyserRef.current;
+        if (!a) return;
+        a.getByteFrequencyData(data);
+        const next: number[] = [];
+        for (let i = 0; i < WAVE_BARS; i++) {
+          // Sample lower-mid frequencies where voice energy lives.
+          const idx = Math.min(bins - 1, Math.floor((i / WAVE_BARS) * bins * 0.7));
+          next.push(Math.max(0.12, Math.min(1, data[idx] / 210)));
+        }
+        setLevels(next);
+        waveRafRef.current = window.requestAnimationFrame(tick);
+      };
+      waveRafRef.current = window.requestAnimationFrame(tick);
+    } catch { /* ignore — fall back to idle bars */ }
+  }
+
+  function stopWaveform() {
+    if (waveRafRef.current) { window.cancelAnimationFrame(waveRafRef.current); waveRafRef.current = null; }
+    analyserRef.current = null;
+    try { void audioCtxRef.current?.close(); } catch { /* ignore */ }
+    audioCtxRef.current = null;
+    setLevels(Array(WAVE_BARS).fill(0.12));
+  }
+
   function blobToDataUrl(blob: Blob) {
     return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -458,6 +505,7 @@ export function CoachPage() {
       recordingTimerRef.current = null;
     }
     await stopAudioRecorder();
+    stopWaveform();
     stopMicStream();
     recognitionRef.current = null;
     setListening(false);
@@ -516,7 +564,7 @@ export function CoachPage() {
       voiceFinalRef.current = "";
       manualStopRef.current = false;
       voiceSendAfterStopRef.current = false;
-      if (mediaStreamRef.current) startAudioRecorder(mediaStreamRef.current);
+      if (mediaStreamRef.current) { startAudioRecorder(mediaStreamRef.current); startWaveform(mediaStreamRef.current); }
       setListening(true);
       setRecordingSeconds(0);
       if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
@@ -567,7 +615,7 @@ export function CoachPage() {
       }, 180);
     };
     recognitionRef.current = recognition;
-    if (mediaStreamRef.current) startAudioRecorder(mediaStreamRef.current);
+    if (mediaStreamRef.current) { startAudioRecorder(mediaStreamRef.current); startWaveform(mediaStreamRef.current); }
     setListening(true);
     setRecordingSeconds(0);
     if (recordingTimerRef.current) window.clearInterval(recordingTimerRef.current);
@@ -755,9 +803,9 @@ export function CoachPage() {
             <button aria-label="Stop recording" onClick={() => stopVoice(false)} style={{ width: 40, height: 40, borderRadius: 14, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
               <Square size={14} style={{ color: "#ff3b5c", fill: "#ff3b5c" }} />
             </button>
-            <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 3, height: 36, overflow: "hidden" }}>
-              {Array.from({ length: 42 }).map((_, i) => (
-                <span key={i} style={{ width: 3, height: 8 + ((i * 7) % 22), borderRadius: 3, background: i > 28 ? accent : "rgba(255,255,255,0.55)", opacity: 0.85, transformOrigin: "center", animation: `voiceWave 0.9s ${(i % 9) * 0.05}s ease-in-out infinite`, flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, height: 36, overflow: "hidden" }}>
+              {levels.map((lvl, i) => (
+                <span key={i} style={{ flex: 1, minWidth: 2, maxWidth: 4, height: Math.round(4 + lvl * 30), borderRadius: 3, background: accent, opacity: 0.35 + lvl * 0.65, transition: "height 0.08s linear, opacity 0.08s linear" }} />
               ))}
             </div>
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, fontSize: 13, color: accent, minWidth: 36, textAlign: "right" }}>{voiceTime}</span>
