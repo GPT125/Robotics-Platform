@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, BrainCircuit, MoreVertical, Sparkles } from "lucide-react";
+import { Search, Star, Trophy, MapPin, Globe, TrendingUp, ChevronRight, ArrowLeft, Users, Zap, Award, CheckCircle, X, Loader2, MoreVertical, Sparkles } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
 import { MatchCard } from "../MatchCard";
@@ -229,11 +229,6 @@ function yearGameMap(events: RoboEvent[]): Record<string, string> {
   return map;
 }
 
-function teamLine(team: RoboTeamResult, reverse = false) {
-  const name = team.team_name && team.team_name !== team.number ? team.team_name : "";
-  return reverse && name ? `${name} ${team.number}` : name ? `${team.number} ${name}` : team.number;
-}
-
 function cleanAiSummary(text: string, fallback: string) {
   const cleaned = text
     .replace(/^confidence:.*$/gim, "")
@@ -296,16 +291,6 @@ function rankingTeamNumber(ranking: RoboRanking) {
 
 function skillTeamNumber(skill: RoboSkills) {
   return skill.team?.number ?? skill.team_number ?? "";
-}
-
-function prediction(match: RoboMatch, rankings: RoboRanking[]) {
-  const { redTeams, blueTeams } = matchAlliances(match);
-  const ranks = new Map(rankings.map((r) => [rankingTeamNumber(r), rankFor(r)]));
-  const redRank = redTeams.reduce((sum, t) => sum + (ranks.get(t.number) ?? 60), 0) / Math.max(redTeams.length, 1);
-  const blueRank = blueTeams.reduce((sum, t) => sum + (ranks.get(t.number) ?? 60), 0) / Math.max(blueTeams.length, 1);
-  const delta = Math.max(-28, Math.min(28, blueRank - redRank));
-  const red = Math.max(20, Math.min(80, Math.round(50 + delta)));
-  return { red, blue: 100 - red, pick: red >= 50 ? "red" : "blue" };
 }
 
 function gaussianSolve(a: number[][], b: number[]) {
@@ -1367,69 +1352,24 @@ function EventDetail({ event, accent, onBack, onTeamClick }: { event: RoboEvent;
           ) : null}
           {displayedMatches.map((m) => {
             const model = matchDisplayModel(m);
-            const redScore = model.red?.score ?? null;
-            const blueScore = model.blue?.score ?? null;
-            const scored = redScore != null && blueScore != null;
-            const redWon = scored && redScore > blueScore;
-            const p = prediction(m, profile.rankings);
             const allTeams = model.format === "head_to_head"
               ? [...model.redTeams, ...model.blueTeams]
               : model.alliances.flatMap((alliance) => alliance.teams);
             return (
-              <div key={m.id} style={{ background: "#111320", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, overflow: "hidden" }}>
-                <div style={{ padding: "8px 14px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#7a80a0", fontWeight: 600 }}>{matchLabel(m)}{m.field ? ` · ${m.field}` : ""}</span>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: "#7a80a0" }}>{m.scheduled ? new Date(m.scheduled).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Time TBD"}</span>
-                </div>
-                {model.format === "head_to_head" ? (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", padding: "12px 14px", gap: 8, alignItems: "center" }}>
-                    <div style={{ background: "#ff3b5c12", border: "1px solid #ff3b5c25", borderRadius: 10, padding: "8px 10px" }}>
-                      {model.redTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: redWon ? "#ff6b7a" : "#9aa0bf", fontWeight: 700 }}>{teamLine(t)}</p>)}
-                      <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 22, color: redWon ? "#ff3b5c" : "#7a80a0", marginTop: 5 }}>{scored ? redScore : "—"}</p>
-                    </div>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "rgba(255,255,255,0.25)" }}>VS</span>
-                    <div style={{ background: "#00c8ff12", border: "1px solid #00c8ff25", borderRadius: 10, padding: "8px 10px", textAlign: "right" }}>
-                      {model.blueTeams.map((t) => <p key={t.number} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: scored && !redWon ? "#60d0ff" : "#9aa0bf", fontWeight: 700 }}>{teamLine(t, true)}</p>)}
-                      <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 22, color: scored && !redWon ? "#00c8ff" : "#7a80a0", marginTop: 5 }}>{scored ? blueScore : "—"}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px" }}>
-                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: accent }}>{model.format === "teamwork" ? "Teamwork / cooperative format" : "RobotEvents participant format"}</p>
-                    {model.alliances.map((alliance) => (
-                      <div key={alliance.key} style={{ background: "#1a1e30", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "9px 10px", display: "flex", justifyContent: "space-between", gap: 10 }}>
-                        <div>
-                          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 12, color: "#e8eaf0" }}>{alliance.label}</p>
-                          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, color: "#9aa0bf", marginTop: 3 }}>{alliance.teams.map((t) => teamLine(t)).join(" · ") || "Teams TBD"}</p>
-                        </div>
-                        <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 18, color: alliance.score != null ? accent : "#7a80a0" }}>{alliance.score ?? "—"}</span>
-                      </div>
-                    ))}
-                  </div>
+              <MatchCard
+                key={m.id}
+                match={m}
+                rankings={profile.rankings}
+                highlightTeam={appTeam?.number}
+                accent={accent}
+                onTeamClick={(num) => {
+                  const team = allTeams.find((t) => t.number === num);
+                  if (team) setMatchNoteTarget({ match: m, team });
+                }}
+                headerAction={(
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 8, letterSpacing: "0.06em", color: "#5c627e" }}>TAP A TEAM TO SCOUT</span>
                 )}
-                {!scored && model.canPredict ? (
-                  <div style={{ padding: "0 14px 12px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
-                      <BrainCircuit size={12} style={{ color: accent }} />
-                      <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 11, color: "#e8eaf0" }}>Prediction: Red {p.red}% · Blue {p.blue}%</span>
-                    </div>
-                    <div style={{ height: 8, background: "#00c8ff22", borderRadius: 6, overflow: "hidden" }}>
-                      <div style={{ width: `${p.red}%`, height: "100%", background: "#ff3b5c", borderRadius: 6 }} />
-                    </div>
-                  </div>
-                ) : scored && model.format === "head_to_head" ? (
-                  <div style={{ padding: "0 14px 12px" }}>
-                    <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 11.5, color: redWon ? "#ff6b7a" : "#60d0ff" }}>Final: {redWon ? "Red" : "Blue"} by {Math.abs((redScore ?? 0) - (blueScore ?? 0))}</span>
-                  </div>
-                ) : null}
-                {allTeams.length ? (
-                  <div style={{ padding: "0 14px 12px", display: "flex", gap: 6, overflowX: "auto", scrollbarWidth: "none" }}>
-                    {allTeams.map((team) => (
-                      <button key={`${m.id}-${team.number}`} onClick={() => setMatchNoteTarget({ match: m, team })} style={{ flexShrink: 0, minHeight: 32, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "7px 9px", color: "#cfd3e6", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 10.5, cursor: "pointer" }}>Scout {team.number}</button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
+              />
             );
           })}
           {!displayedMatches.length ? <div style={{ textAlign: "center", padding: "44px 20px", color: "#7a80a0", fontFamily: "'Inter', sans-serif", fontSize: 13 }}>{showDaySlider ? `No matches scheduled for ${dayLabel(selectedDayKey)}.` : "No matches returned by RobotEvents yet."}</div> : null}
