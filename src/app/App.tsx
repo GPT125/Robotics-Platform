@@ -15,6 +15,7 @@ import { TodoPage } from "./components/pages/TodoPage";
 import { AlliancePage } from "./components/pages/AlliancePage";
 import { AwardRadarPage } from "./components/pages/AwardRadarPage";
 import { MatchupLabPage } from "./components/pages/MatchupLabPage";
+import { GameManualPage } from "./components/pages/GameManualPage";
 
 function greetingFor(name: string) {
   const hour = new Date().getHours();
@@ -148,14 +149,15 @@ function AppShell() {
     lookup: <LookupPage resetKey={lookupResetKey} onNavigate={changePage} />,
     coach: <CoachPage />,
     scout: <ScoutPage />,
-    settings: <SettingsPage onSignIn={() => setForceOnboarding(true)} />,
+    settings: <SettingsPage onSignIn={() => setForceOnboarding(true)} onNavigate={changePage} />,
     todos: <TodoPage onBack={() => changePage("home")} />,
     alliance: <AlliancePage onBack={() => changePage("home")} />,
     awardRadar: <AwardRadarPage onBack={() => changePage("home")} />,
     matchupLab: <MatchupLabPage onBack={() => changePage("home")} />,
+    gameManual: <GameManualPage onBack={() => changePage("settings")} />,
   };
 
-  const isSubPage = activePage === "todos" || activePage === "alliance" || activePage === "awardRadar" || activePage === "matchupLab";
+  const isSubPage = activePage === "todos" || activePage === "alliance" || activePage === "awardRadar" || activePage === "matchupLab" || activePage === "gameManual";
 
   return (
     <div style={{ minHeight: "100dvh", background: "#05060d", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>

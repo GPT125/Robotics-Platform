@@ -100,14 +100,20 @@ export function MatchupLabPage({ onBack }: { onBack: () => void }) {
         </div>
         <div style={{ display: "grid", gap: 12 }}>
           <div style={{ background: "#111320", border: "1px solid #ff3b5c25", borderRadius: 16, padding: 14 }}>
-            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, color: "#ff6b7a", marginBottom: 10 }}>Red alliance</p>
-            <TeamSearch onSelect={(team) => void addTeam("red", team)} showFilters={false} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 10 }}>{red.map((team) => <TeamPill key={team.number} team={team} side="red" />)}</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, color: "#ff6b7a" }}>Red alliance</p>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: red.length >= needed ? "#10b981" : "#7a80a0", background: "rgba(255,255,255,0.05)", borderRadius: 7, padding: "3px 8px" }}>{red.length}/{needed}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: red.length < needed ? 10 : 0 }}>{red.map((team) => <TeamPill key={team.number} team={team} side="red" />)}</div>
+            {red.length < needed ? <TeamSearch key={`red-${red.length}`} onSelect={(team) => void addTeam("red", team)} showFilters={false} placeholder={mode === "2v2" ? `Add team ${red.length + 1} of ${needed}…` : "Search team number, name, or school…"} /> : null}
           </div>
           <div style={{ background: "#111320", border: "1px solid #00c8ff25", borderRadius: 16, padding: 14 }}>
-            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, color: "#60d0ff", marginBottom: 10 }}>Blue alliance</p>
-            <TeamSearch onSelect={(team) => void addTeam("blue", team)} showFilters={false} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 10 }}>{blue.map((team) => <TeamPill key={team.number} team={team} side="blue" />)}</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, color: "#60d0ff" }}>Blue alliance</p>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: blue.length >= needed ? "#10b981" : "#7a80a0", background: "rgba(255,255,255,0.05)", borderRadius: 7, padding: "3px 8px" }}>{blue.length}/{needed}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: blue.length < needed ? 10 : 0 }}>{blue.map((team) => <TeamPill key={team.number} team={team} side="blue" />)}</div>
+            {blue.length < needed ? <TeamSearch key={`blue-${blue.length}`} onSelect={(team) => void addTeam("blue", team)} showFilters={false} placeholder={mode === "2v2" ? `Add team ${blue.length + 1} of ${needed}…` : "Search team number, name, or school…"} /> : null}
           </div>
         </div>
         {prediction ? (

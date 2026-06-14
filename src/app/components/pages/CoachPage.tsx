@@ -7,6 +7,7 @@ import { downscaleImage, readFileAsDataUrl, extractVideoFrames } from "../media"
 import { LANGUAGE_NAME } from "../../../services/i18n";
 import { predictorStats } from "../../../services/predictor";
 import { transcribeVoice } from "../../../services/firebaseBackend";
+import { manualsAiContext } from "../../../services/manuals";
 
 type Attachment = { id: string; kind: "image" | "video"; preview: string; images: string[] };
 type Message = { role: "user" | "ai"; text: string; time: string; sources?: CoachSource[]; images?: string[] };
@@ -37,6 +38,7 @@ function getTime() {
 
 const COACH_KEY = "matchmind:coach-sessions:v1";
 const LEGACY_COACH_KEY = "robolab:coach-sessions:v1";
+const AI_DISCLAIMER_KEY = "matchmind:ai-disclaimer-agreed";
 
 function sid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -186,6 +188,9 @@ export function CoachPage() {
   const [processing, setProcessing] = useState(false);
   const [listening, setListening] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [aiDisclaimerOpen, setAiDisclaimerOpen] = useState(() => {
+    try { return window.localStorage.getItem(AI_DISCLAIMER_KEY) !== "yes"; } catch { return true; }
+  });
   const WAVE_BARS = 42;
   const [levels, setLevels] = useState<number[]>(() => Array(WAVE_BARS).fill(0.12));
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -334,7 +339,10 @@ export function CoachPage() {
         if (code.includes("U")) return "RULES: default to VEX U (VURC) rules. Official manual: https://link.vex.com/docs/vurc-manual . VEX U is head-to-head, one team per alliance with two robots, and has NO alliance selection.";
         return "RULES: default to V5RC (VRC) rules. Official manual: https://link.vex.com/docs/v5rc-manual . V5RC plays 2v2 (Red vs Blue); after qualifications the top-ranked teams become alliance captains (8 or 16 alliances depending on event size) and each picks one partner.";
       })(),
+      manualsAiContext(),
       "Only the official game manual, official Q&A, and head referees are authoritative for rules — say so when a ruling matters.",
+      // Strict scope: VEX robotics + education only.
+      "SCOPE POLICY (strict): You ONLY help with VEX Robotics (VRC, VIQRC, VEX U, VEX AI) and directly related STEM/education topics. NEVER give medical, legal, financial, mental-health, or other unrelated advice. If the user asks anything outside VEX/education, do not answer it — reply exactly in the spirit of: \"Sorry, I can't help you with that. Would you like me to explain the VEX VRC game manual?\" and steer the conversation back to VEX. Always redirect off-topic requests this way.",
       `Respond in ${LANGUAGE_NAME[(language as keyof typeof LANGUAGE_NAME)] ?? "English"}.`,
       "Do not end messages with emojis; use at most one emoji and only when genuinely helpful.",
       (() => { const ps = predictorStats(); return ps.total > 0 ? `MatchMind's AI match predictor record so far: ${ps.correct}/${ps.total} correct — it learns from every miss.` : ""; })(),
@@ -641,18 +649,22 @@ export function CoachPage() {
     const images = sending.flatMap((a) => a.images);
     const previews = sending.map((a) => a.preview);
     const history = messages.map((m) => ({ role: (m.role === "ai" ? "assistant" : "user") as "assistant" | "user", content: m.text }));
-    const userText = q || "Analyze the attached robot media and tell me what to fix.";
-    updateSessionMessages(sessionId, (prev) => [...prev, { role: "user", text: userText, time: getTime(), images: previews }]);
+    // The user's message bubble shows only what they actually typed (just the
+    // image when they send a photo with no text). The AI still receives a short
+    // instruction so it knows to analyze the media — but we never display a
+    // canned "Analyze the attached robot media" message as if the user wrote it.
+    const promptForAi = q || "Analyze the attached robot media and tell me what to improve.";
+    updateSessionMessages(sessionId, (prev) => [...prev, { role: "user", text: q, time: getTime(), images: previews }]);
     setInput("");
     setAttachments([]);
     setIsTyping(true);
     try {
-      const grounded = images.length ? null : await groundedTeamAnswer(userText);
+      const grounded = images.length ? null : await groundedTeamAnswer(promptForAi);
       if (grounded) {
         updateSessionMessages(sessionId, (prev) => [...prev, { role: "ai", text: grounded.answer, time: getTime(), sources: grounded.sources }]);
         return;
       }
-      const result = await askCoach({ messages: [...history, { role: "user", content: userText }], context: platformContext(), images });
+      const result = await askCoach({ messages: [...history, { role: "user", content: promptForAi }], context: platformContext(), images });
       updateSessionMessages(sessionId, (prev) => [...prev, { role: "ai", text: result.answer, time: getTime(), sources: result.sources }]);
     } catch (err) {
       updateSessionMessages(sessionId, (prev) => [...prev, { role: "ai", text: err instanceof Error ? err.message : "I could not reach the AI right now — please try again.", time: getTime() }]);
@@ -859,6 +871,22 @@ export function CoachPage() {
         </div>
         )}
       </div>
+
+      {aiDisclaimerOpen ? (
+        <div style={{ position: "absolute", inset: 0, zIndex: 80, background: "rgba(4,5,12,0.82)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <div style={{ width: "100%", maxWidth: 380, background: "#0d0f1c", borderRadius: 22, border: `1px solid ${accent}35`, padding: "22px 18px 18px", boxShadow: "0 18px 60px rgba(0,0,0,0.55)" }}>
+            <div style={{ width: 46, height: 46, borderRadius: 14, background: `linear-gradient(135deg, ${accent}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+              <BrainCircuit size={22} style={{ color: "#fff" }} />
+            </div>
+            <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 18, color: "#e8eaf0", marginBottom: 8 }}>Before you chat with MatchMind AI</p>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#cfd3e6", lineHeight: 1.55, display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              <p>MatchMind AI is a helpful assistant, but it is <strong>not perfect and can make mistakes</strong>. It may be wrong about rules, scores, schedules, or team data.</p>
+              <p>Always <strong>verify important information</strong> against the official game manual, RobotEvents, and your event's head referee before acting on it.</p>
+            </div>
+            <button onClick={() => { try { window.localStorage.setItem(AI_DISCLAIMER_KEY, "yes"); } catch { /* ignore */ } setAiDisclaimerOpen(false); }} style={{ width: "100%", background: accent, border: "none", borderRadius: 13, padding: "13px", color: "#08090f", fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 14, cursor: "pointer" }}>I understand</button>
+          </div>
+        </div>
+      ) : null}
 
       <style>{`@keyframes typingBounce {0%,60%,100%{transform:translateY(0);opacity:0.5;}30%{transform:translateY(-6px);opacity:1;}} @keyframes voiceWave {0%,100%{transform:scaleY(0.45);opacity:0.45;}50%{transform:scaleY(1.35);opacity:1;}}`}</style>
     </div>

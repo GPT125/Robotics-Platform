@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Wifi, Shield, LogOut, Info, CheckCircle, Upload, UserPlus, Trash2, Pencil, Check, X, ChevronRight, Globe, Plus, ArrowUp } from "lucide-react";
+import { Bell, Shield, LogOut, Info, CheckCircle, Upload, Trash2, Pencil, Check, X, ChevronRight, Globe, Plus, ArrowUp, BookOpen, Mail } from "lucide-react";
 import { useAccent, ACCENT_COLORS } from "../AccentContext";
 import { useApp, type RoboTeam, type UserRole } from "../AppContext";
 import { TeamSearch } from "../TeamSearch";
 import { readFileAsDataUrl, downscaleImage } from "../media";
-import { sendInviteEmail } from "../../../services/api";
 import { LANGUAGES } from "../../../services/i18n";
 
 const PRESET_AVATARS = ["🤖", "⚙️", "🦾", "🔧", "⚡", "🏆", "🚀", "🎯", "🛠️", "🔩", "🧠", "🦿"];
@@ -103,9 +102,9 @@ function SectionDivider() {
   return <div style={{ height: 1, background: "rgba(255,255,255,0.05)" }} />;
 }
 
-export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
+export function SettingsPage({ onSignIn, onNavigate }: { onSignIn?: () => void; onNavigate?: (page: string) => void }) {
   const { accent, setAccent } = useAccent();
-  const { profile, team, teams, role, language, teammates, signedIn, isGuest, setTeam, setTeams, setRole, setLanguage, updateProfile, addTeammate, removeTeammate, signOut, setOnboarded } = useApp();
+  const { profile, team, teams, role, language, signedIn, isGuest, setTeams, setRole, setLanguage, updateProfile, signOut, setOnboarded } = useApp();
   const [notifications, setNotifications] = useState(true);
   const [matchAlerts, setMatchAlerts] = useState(true);
   const [dataSharing, setDataSharing] = useState(false);
@@ -115,9 +114,6 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
   const [legalDoc, setLegalDoc] = useState<string | null>(null);
   const [editName, setEditName] = useState(false);
   const [nameDraft, setNameDraft] = useState(profile?.name ?? "");
-  const [mate, setMate] = useState({ name: "", email: "" });
-  const [notice, setNotice] = useState<string | null>(null);
-  const [inviteBusy, setInviteBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const teamLimit = role ? TEAM_LIMIT[role] : 1;
@@ -136,21 +132,6 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
     const small = await downscaleImage(raw, 256, 0.8);
     updateProfile({ avatar: small });
     setShowAvatar(false);
-  }
-
-  async function inviteTeammate() {
-    if (!/\S+@\S+\.\S+/.test(mate.email) || inviteBusy) return;
-    setInviteBusy(true);
-    addTeammate(mate);
-    try {
-      const result = await sendInviteEmail({ name: mate.name || mate.email, email: mate.email, teamNumber: team?.number, senderName: profile?.name });
-      setNotice(result.message ?? "Invite saved. Configure an email provider on the server for real email delivery.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Invite saved locally, but email delivery is not configured.");
-    } finally {
-      setMate({ name: "", email: "" });
-      setInviteBusy(false);
-    }
   }
 
   return (
@@ -226,28 +207,6 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
           </div>
         </Section>
 
-        {/* Teammates */}
-        <Section title="TEAMMATES">
-          <div style={{ paddingTop: 12, paddingBottom: 14 }}>
-            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#7a80a0", marginBottom: 12 }}>Invite teammates by email to share to-do lists and messages.</p>
-            {teammates.map((m) => (
-              <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0" }}>
-                <div style={{ width: 34, height: 34, borderRadius: 10, background: "#1a1e30", color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 12 }}>{(m.name || m.email)[0]?.toUpperCase()}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 600, fontSize: 13, color: "#e8eaf0" }}>{m.name || m.email}</p>
-                  <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#7a80a0" }}>{m.email} · {m.status}</p>
-                </div>
-                <button onClick={() => removeTeammate(m.id)} style={{ background: "transparent", border: "none", cursor: "pointer", padding: 4 }}><Trash2 size={15} style={{ color: "#4a5070" }} /></button>
-              </div>
-            ))}
-            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-              <input value={mate.name} onChange={(e) => setMate({ ...mate, name: e.target.value })} placeholder="Name" style={{ width: 90, background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "9px 10px", color: "#e8eaf0", outline: "none", fontSize: 13 }} />
-              <input value={mate.email} onChange={(e) => setMate({ ...mate, email: e.target.value })} placeholder="teammate@email.com" style={{ flex: 1, background: "#181c2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, padding: "9px 10px", color: "#e8eaf0", outline: "none", fontSize: 13 }} />
-              <button onClick={inviteTeammate} style={{ width: 40, borderRadius: 10, background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, opacity: inviteBusy ? 0.6 : 1 }}><UserPlus size={17} style={{ color: "#08090f" }} /></button>
-            </div>
-          </div>
-        </Section>
-
         {/* Accent color */}
         <Section title="ACCENT COLOR">
           <div style={{ paddingTop: 14, paddingBottom: 16 }}>
@@ -314,6 +273,17 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
           ) : null}
         </Section>
 
+        {/* Resources */}
+        <Section title="RESOURCES">
+          <SettingRow
+            icon={<BookOpen size={16} style={{ color: accent }} />}
+            iconBg={`${accent}15`}
+            label="Game Manuals"
+            sub="Official rules for every VEX program"
+            onClick={() => onNavigate?.("gameManual")}
+          />
+        </Section>
+
         {/* Notifications */}
         <Section title="NOTIFICATIONS">
           <SettingRow
@@ -340,6 +310,27 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
             label="Anonymous Data Sharing"
             sub="Help improve MatchMind"
             right={<Toggle value={dataSharing} onChange={setDataSharing} accent={accent} />}
+          />
+        </Section>
+
+        {/* Support */}
+        <Section title="SUPPORT & COMMUNITY">
+          <SettingRow
+            icon={<Mail size={16} style={{ color: accent }} />}
+            iconBg={`${accent}15`}
+            label="Contact MatchMind support"
+            sub="vexmatchmind@gmail.com · we welcome your feedback"
+            onClick={() => { window.location.href = "mailto:vexmatchmind@gmail.com?subject=MatchMind%20Feedback"; }}
+          />
+          <SectionDivider />
+          <SettingRow
+            icon={(
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#5865F2" aria-hidden="true"><path d="M20.317 4.369A19.79 19.79 0 0 0 15.885 3c-.214.382-.46.898-.63 1.304a18.27 18.27 0 0 0-5.51 0A12.6 12.6 0 0 0 9.11 3 19.74 19.74 0 0 0 4.677 4.37C1.99 8.39 1.26 12.31 1.624 16.18a19.95 19.95 0 0 0 6.073 3.08c.49-.67.927-1.38 1.302-2.13-.717-.27-1.404-.604-2.053-.997.172-.126.34-.258.503-.394 3.957 1.85 8.232 1.85 12.142 0 .164.137.332.268.503.394-.65.394-1.34.728-2.057.998.375.748.81 1.46 1.3 2.13a19.9 19.9 0 0 0 6.077-3.08c.43-4.49-.732-8.376-3.097-11.812ZM8.02 13.83c-1.183 0-2.156-1.085-2.156-2.42 0-1.334.95-2.42 2.156-2.42 1.212 0 2.18 1.095 2.157 2.42 0 1.335-.95 2.42-2.157 2.42Zm7.962 0c-1.183 0-2.156-1.085-2.156-2.42 0-1.334.95-2.42 2.156-2.42 1.212 0 2.18 1.095 2.157 2.42 0 1.335-.945 2.42-2.157 2.42Z"/></svg>
+            )}
+            iconBg="#5865F215"
+            label="Join the MatchMind Discord"
+            sub="Chat with the team and other competitors"
+            onClick={() => window.open("https://discord.gg/MhVZjCZGbc", "_blank", "noopener,noreferrer")}
           />
         </Section>
 
@@ -385,19 +376,6 @@ export function SettingsPage({ onSignIn }: { onSignIn?: () => void }) {
               setTeams(next);
               setShowTeam(false);
             }} />
-          </div>
-          <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
-        </div>
-      ) : null}
-
-      {notice ? (
-        <div onClick={() => setNotice(null)} style={{ position: "fixed", inset: 0, zIndex: 210, background: "rgba(5,6,13,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 14px", boxSizing: "border-box" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#0c0e18", border: `1px solid ${accent}30`, borderRadius: 24, padding: "20px 18px 24px", animation: "modalDrop 0.28s cubic-bezier(0.22,1,0.36,1)", boxShadow: "0 18px 60px rgba(0,0,0,0.45)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <h3 style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 19, color: "#fff", margin: 0 }}>MatchMind setup</h3>
-              <button onClick={() => setNotice(null)} style={{ background: "#181c2e", border: "none", borderRadius: 9, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={16} style={{ color: "#e8eaf0" }} /></button>
-            </div>
-            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#b0b4c8", lineHeight: 1.6 }}>{notice}</p>
           </div>
           <style>{`@keyframes modalDrop{from{opacity:0;transform:translateY(-14px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
         </div>

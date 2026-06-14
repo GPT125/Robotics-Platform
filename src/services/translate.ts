@@ -201,7 +201,10 @@ export function setTranslationLanguage(lang: string | null | undefined) {
   current = next;
   gen += 1;
   document.documentElement.lang = next;
-  document.documentElement.dir = next === "ar" || next === "fa" ? "rtl" : "ltr";
+  // Keep the layout LTR for every language — translate the text only, never
+  // mirror/flip the UI (per product decision). RTL scripts still render their
+  // own glyphs correctly; we just don't reflow the whole app.
+  document.documentElement.dir = "ltr";
   if (next === "en") {
     // Restore originals, then stop observing — no overhead for English users.
     retranslate();

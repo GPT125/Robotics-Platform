@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Trophy, Zap, Target, Clock, TrendingUp, ChevronRight, Star, ListChecks, Plus, WifiOff, MessageCircle, Bell, CheckCircle, Award, Swords } from "lucide-react";
+import { Trophy, Zap, Target, Clock, TrendingUp, ChevronRight, Star, ListChecks, Plus, WifiOff, MessageCircle, Bell, CheckCircle, Award, Swords, BookOpen } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { useAccent } from "../AccentContext";
 import { useApp } from "../AppContext";
@@ -430,6 +430,17 @@ export function HomePage({ onNavigate }: { onNavigate?: (p: string) => void }) {
         <div style={{ flex: 1 }}>
           <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, color: "#e8eaf0" }}>Matchup Lab</p>
           <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf" }}>1v1 or 2v2 AI prediction workspace</p>
+        </div>
+        <ChevronRight size={16} style={{ color: accent }} />
+      </button>
+
+      <button onClick={() => onNavigate?.("gameManual")} style={{ background: "#111320", border: `1px solid ${accent}22`, borderRadius: 16, padding: 16, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left" }}>
+        <div style={{ width: 40, height: 40, borderRadius: 12, background: "#10b98118", border: "1px solid #10b98130", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <BookOpen size={20} style={{ color: "#10b981" }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 800, fontSize: 14, color: "#e8eaf0" }}>Game Manuals</p>
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#9aa0bf" }}>Official VEX rules for every program</p>
         </div>
         <ChevronRight size={16} style={{ color: accent }} />
       </button>

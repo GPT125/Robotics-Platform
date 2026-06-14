@@ -12,6 +12,7 @@ export function TeamSearch({
   onProgramChange,
   onGradeChange,
   showFilters = true,
+  placeholder = "Search team number, name, or school…",
 }: {
   onSelect: (team: RoboTeam) => void;
   selectedId?: number;
@@ -20,6 +21,7 @@ export function TeamSearch({
   onProgramChange?: (program: ProgramCode) => void;
   onGradeChange?: (grade: GradeLevel) => void;
   showFilters?: boolean;
+  placeholder?: string;
 }) {
   const { accent } = useAccent();
   const [q, setQ] = useState("");
@@ -48,7 +50,7 @@ export function TeamSearch({
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search team number, name, or school…"
+          placeholder={placeholder}
           autoFocus
           style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#e8eaf0", fontFamily: "'Inter', sans-serif", fontSize: 14 }}
         />
