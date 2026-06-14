@@ -104,16 +104,17 @@ function NotificationToast({ onNavigate }: { onNavigate: (id: string) => void })
   };
 
   return (
-    <div style={{ position: "fixed", zIndex: 260, top: "calc(var(--rl-safe-top) + 10px)", left: "50%", transform: "translateX(-50%)", width: "calc(100% - 28px)", maxWidth: 402, pointerEvents: "none" }}>
-      <div onClick={go} style={{ pointerEvents: "auto", cursor: "pointer", display: "flex", alignItems: "center", gap: 11, background: `linear-gradient(135deg, ${color}18, rgba(17,19,32,0.96))`, border: `1px solid ${color}45`, boxShadow: `0 16px 44px rgba(0,0,0,0.38), 0 0 28px ${color}18`, borderRadius: 18, padding: "12px 13px", backdropFilter: "blur(18px)", animation: "toastIn 0.34s cubic-bezier(0.22,1,0.36,1)" }}>
-        <div style={{ width: 36, height: 36, borderRadius: 13, background: `${color}18`, border: `1px solid ${color}35`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+    <div style={{ position: "fixed", zIndex: 260, top: "max(calc(var(--rl-safe-top) - 2px), 6px)", left: "50%", transform: "translateX(-50%)", width: "calc(100% - 24px)", maxWidth: 390, pointerEvents: "none" }}>
+      {/* Dynamic Island-style pill: dark, rounded, expands from the notch. */}
+      <div onClick={go} style={{ pointerEvents: "auto", cursor: "pointer", display: "flex", alignItems: "center", gap: 11, background: "rgba(8,9,14,0.92)", border: `1px solid ${color}40`, boxShadow: `0 14px 40px rgba(0,0,0,0.5), 0 0 26px ${color}22`, borderRadius: 26, padding: "10px 12px", backdropFilter: "blur(22px)", WebkitBackdropFilter: "blur(22px)", transformOrigin: "top center", animation: "islandIn 0.42s cubic-bezier(0.22,1.4,0.36,1)" }}>
+        <div style={{ width: 38, height: 38, borderRadius: "50%", background: `${color}1c`, border: `1px solid ${color}40`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: `0 0 14px ${color}30` }}>
           <ToastIcon type={active.type} color={color} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 900, fontSize: 13.5, color: "#f4f7ff", lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.title}</p>
-          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#b8bdd6", lineHeight: 1.35, marginTop: 3 }}>{active.body}</p>
+          <p style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#b8bdd6", lineHeight: 1.35, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active.body}</p>
         </div>
-        <button aria-label="Dismiss notification" onClick={(e) => { e.stopPropagation(); active.id === "session-welcome" ? setWelcomeVisible(false) : markNotificationSeen(active.id); }} style={{ width: 28, height: 28, borderRadius: 10, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+        <button aria-label="Dismiss notification" onClick={(e) => { e.stopPropagation(); active.id === "session-welcome" ? setWelcomeVisible(false) : markNotificationSeen(active.id); }} style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
           <X size={13} style={{ color: "#9aa0bf" }} />
         </button>
       </div>
@@ -186,6 +187,7 @@ function AppShell() {
       <style>{`
         @keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toastIn { from { opacity: 0; transform: translateY(-12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes islandIn { 0% { opacity: 0; transform: translateY(-10px) scaleX(0.5) scaleY(0.7); } 60% { opacity: 1; } 100% { opacity: 1; transform: translateY(0) scaleX(1) scaleY(1); } }
         button { -webkit-tap-highlight-color: transparent; transition: transform 0.16s cubic-bezier(0.22,1,0.36,1), filter 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease; }
         button:not(:disabled):hover { filter: brightness(1.08); }
         button:not(:disabled):active { transform: scale(0.96); filter: brightness(0.96); }
