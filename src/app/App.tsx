@@ -4,6 +4,7 @@ import { AccentProvider } from "./components/AccentContext";
 import { AppProvider, useApp, type AppNotification } from "./components/AppContext";
 import { useAccent } from "./components/AccentContext";
 import { Onboarding } from "./components/Onboarding";
+import { setTranslationLanguage } from "../services/translate";
 import { BottomNav } from "./components/BottomNav";
 import { HomePage } from "./components/pages/HomePage";
 import { LookupPage } from "./components/pages/LookupPage";
@@ -130,6 +131,10 @@ function AppShell() {
   });
   const [lookupResetKey, setLookupResetKey] = useState(0);
   const [forceOnboarding, setForceOnboarding] = useState(false);
+  const { language } = useApp();
+
+  // Translate the whole UI into the selected language at runtime (cached).
+  useEffect(() => { setTranslationLanguage(language); }, [language]);
 
   const changePage = (id: string) => {
     if (id === "lookup" && activePage === "lookup") {

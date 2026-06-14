@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
@@ -559,4 +560,88 @@ export const transcribeVoice = onCall({ secrets: [OPENAI_API_KEY] }, async (requ
   const json = await response.json().catch(() => ({})) as { text?: string; error?: { message?: string } };
   if (!response.ok) throw new HttpsError("unavailable", json.error?.message ?? `Transcription returned ${response.status}.`);
   return { text: cleanText(json.text, 8000) };
+});
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  es: "Spanish", fr: "French", de: "German", pt: "Portuguese", it: "Italian", nl: "Dutch",
+  pl: "Polish", tr: "Turkish", ru: "Russian", uk: "Ukrainian", zh: "Simplified Chinese",
+  ja: "Japanese", ko: "Korean", hi: "Hindi", ar: "Arabic", fa: "Persian (Farsi)",
+  vi: "Vietnamese", id: "Indonesian", el: "Greek",
+};
+
+function thash(s: string) {
+  return createHash("sha1").update(s).digest("hex").slice(0, 24);
+}
+
+function parseJsonStringArray(raw: string): string[] | null {
+  const match = raw.match(/\[[\s\S]*\]/);
+  if (!match) return null;
+  try {
+    const arr = JSON.parse(match[0]);
+    return Array.isArray(arr) ? arr.map((x) => String(x ?? "")) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function translateChunk(texts: string[], languageName: string): Promise<string[]> {
+  const providers = [
+    { provider: "Groq", url: "https://api.groq.com/openai/v1/chat/completions", key: GROQ_API_KEY.value(), model: "llama-3.3-70b-versatile" },
+    { provider: "OpenAI", url: "https://api.openai.com/v1/chat/completions", key: OPENAI_API_KEY.value(), model: "gpt-4o-mini" },
+    { provider: "DeepSeek", url: "https://api.deepseek.com/chat/completions", key: DEEPSEEK_API_KEY.value(), model: "deepseek-chat" },
+    { provider: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions", key: OPENROUTER_API_KEY.value(), model: "openai/gpt-4o-mini", extraHeaders: { "HTTP-Referer": "https://matchmind.web.app", "X-Title": "MatchMind" } as Record<string, string> },
+  ].filter((p) => p.key);
+  const system = `You are a professional UI localizer for a VEX robotics mobile app. Translate each string in the user's JSON array into ${languageName}. Return ONLY a JSON array of strings, exactly the same length and order as the input. Translate naturally and concisely for buttons and labels. Do NOT translate or alter: the brand names MatchMind, VEX, RobotEvents, VRC, V5RC, VIQRC, VURC; team numbers/codes; numbers; URLs; or anything inside double curly braces. Preserve trailing punctuation.`;
+  for (const p of providers) {
+    try {
+      const response = await fetch(p.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key}`, ...(p.extraHeaders ?? {}) },
+        body: JSON.stringify({ model: p.model, temperature: 0, max_tokens: 3500, messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(texts) }] }),
+      });
+      const json = await response.json().catch(() => ({})) as { choices?: Array<{ message?: { content?: string } }> };
+      if (!response.ok) continue;
+      const arr = parseJsonStringArray(String(json.choices?.[0]?.message?.content ?? ""));
+      if (arr && arr.length === texts.length) return arr.map((x, i) => (x && x.trim() ? x : texts[i]));
+    } catch {
+      /* try next provider */
+    }
+  }
+  return texts;
+}
+
+// Batch-translate UI strings into the target language, with a Firestore cache so
+// each unique string is only paid for once across all users.
+export const translateBatch = onCall({ secrets: [GROQ_API_KEY, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY] }, async (request) => {
+  requireAuth(request.auth?.uid);
+  const data = request.data as { targetLang?: string; texts?: string[] };
+  const lang = cleanText(data.targetLang, 8).toLowerCase();
+  const languageName = LANGUAGE_NAMES[lang];
+  const texts = Array.isArray(data.texts) ? data.texts.map((t) => cleanText(t, 600)).filter(Boolean) : [];
+  if (lang === "en" || !languageName) return { translations: Object.fromEntries(texts.map((t) => [t, t])) };
+  const uniq = Array.from(new Set(texts)).slice(0, 200);
+  if (!uniq.length) return { translations: {} };
+
+  const refs = uniq.map((t) => db.collection("translationsCache").doc(`${lang}_${thash(t)}`));
+  const snaps = await db.getAll(...refs);
+  const result: Record<string, string> = {};
+  const misses: string[] = [];
+  snaps.forEach((snap, i) => {
+    const cached = snap.exists ? (snap.data() as { t?: string }).t : undefined;
+    if (typeof cached === "string") result[uniq[i]] = cached;
+    else misses.push(uniq[i]);
+  });
+
+  for (let i = 0; i < misses.length; i += 40) {
+    const chunk = misses.slice(i, i + 40);
+    const translated = await translateChunk(chunk, languageName);
+    const batch = db.batch();
+    chunk.forEach((src, j) => {
+      const out = translated[j] ?? src;
+      result[src] = out;
+      batch.set(db.collection("translationsCache").doc(`${lang}_${thash(src)}`), { t: out, lang, src, at: FieldValue.serverTimestamp() });
+    });
+    await batch.commit();
+  }
+  return { translations: result };
 });

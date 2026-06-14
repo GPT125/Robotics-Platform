@@ -90,3 +90,7 @@ export async function firebaseAskCoach(input: { messages?: FirebaseCoachMessage[
 export async function transcribeVoice(input: { audioBase64: string; mimeType: string }) {
   return callBackend<{ text: string }>("transcribeVoice", input);
 }
+
+export async function translateBatch(input: { targetLang: string; texts: string[] }) {
+  return callBackend<{ translations: Record<string, string> }>("translateBatch", input);
+}
