@@ -47,5 +47,15 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MatchMind uses your microphone for voice input to the AI coach.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>MatchMind transcribes your voice so you can talk to the AI coach.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>MatchMind uses the camera so you can take photos of your robot for the AI coach.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>MatchMind lets you attach robot photos and videos from your library to the AI coach.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>MatchMind can save exported event PDFs and images to your photo library.</string>
 </dict>
 </plist>

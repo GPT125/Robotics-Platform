@@ -40,6 +40,14 @@ const COACH_KEY = "matchmind:coach-sessions:v1";
 const LEGACY_COACH_KEY = "robolab:coach-sessions:v1";
 const AI_DISCLAIMER_KEY = "matchmind:ai-disclaimer-agreed";
 
+// BCP-47 locales for on-device speech recognition, keyed by app language code.
+const SPEECH_LOCALE: Record<string, string> = {
+  en: "en-US", es: "es-ES", fr: "fr-FR", de: "de-DE", pt: "pt-BR", it: "it-IT",
+  nl: "nl-NL", pl: "pl-PL", tr: "tr-TR", ru: "ru-RU", uk: "uk-UA", zh: "zh-CN",
+  ja: "ja-JP", ko: "ko-KR", hi: "hi-IN", ar: "ar-SA", fa: "fa-IR", vi: "vi-VN",
+  id: "id-ID", el: "el-GR",
+};
+
 function sid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -590,7 +598,7 @@ export function CoachPage() {
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = SPEECH_LOCALE[language] ?? "en-US";
     voiceBaseRef.current = input.trim();
     voiceFinalRef.current = "";
     manualStopRef.current = false;
