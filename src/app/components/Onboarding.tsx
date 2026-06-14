@@ -58,7 +58,7 @@ export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: bool
   const [authError, setAuthError] = useState("");
 
   const teamLimit = roleDraft ? TEAM_LIMIT[roleDraft] : 1;
-  const allAgreed = LEGAL_DOCS.every((d) => agreed[d.id]);
+  const allAgreed = LEGAL_DOCS.every((d) => agreed[d.id]) && Boolean(agreed.age13);
   const lang = langDraft;
 
   useEffect(() => {
@@ -291,6 +291,17 @@ export function Onboarding({ forceAuth = false, onComplete }: { forceAuth?: bool
                   </div>
                 );
               })}
+              {(() => {
+                const checked = Boolean(agreed.age13);
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 11, background: "#111320", border: `1px solid ${checked ? accent : "rgba(255,255,255,0.08)"}`, borderRadius: 14, padding: "12px 13px" }}>
+                    <button onClick={() => setAgreed((a) => ({ ...a, age13: !a.age13 }))} style={{ width: 22, height: 22, borderRadius: 7, border: `2px solid ${checked ? accent : "rgba(255,255,255,0.3)"}`, background: checked ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                      {checked ? <Check size={13} style={{ color: "#08090f" }} /> : null}
+                    </button>
+                    <p style={{ flex: 1, fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#d6dae8", margin: 0, lineHeight: 1.4 }}>I am 13 or older, or I have my parent's or guardian's permission to use MatchMind.</p>
+                  </div>
+                );
+              })()}
             </div>
           </>
         ) : null}
