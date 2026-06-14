@@ -4,6 +4,7 @@ import { getAuth, GoogleAuthProvider, OAuthProvider, type Auth } from "firebase/
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getFunctions, type Functions } from "firebase/functions";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
+import { getAnalytics, isSupported as analyticsSupported, logEvent as faLogEvent, setAnalyticsCollectionEnabled, type Analytics } from "firebase/analytics";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -78,5 +79,33 @@ export const appleProvider = (() => {
 export const db = safe<Firestore>("firestore", getFirestore);
 export const functions = safe<Functions>("functions", getFunctions);
 export const storage = safe<FirebaseStorage>("storage", getStorage);
+
+// ===== Anonymous usage analytics (opt-in) =====
+// Privacy-first: collection is OFF until the user enables "Anonymous Data
+// Sharing" in Settings. We only init Analytics once consent is granted, and we
+// only log non-PII events (page views, feature usage) through logUsage().
+let analytics: Analytics | null = null;
+let analyticsConsent = false;
+
+export async function setDataSharing(enabled: boolean) {
+  analyticsConsent = enabled;
+  try {
+    if (enabled && !analytics && app && (await analyticsSupported())) {
+      analytics = getAnalytics(app);
+    }
+    if (analytics) setAnalyticsCollectionEnabled(analytics, enabled);
+  } catch (error) {
+    warn("analytics", error);
+  }
+}
+
+export function logUsage(name: string, params?: Record<string, unknown>) {
+  if (!analyticsConsent || !analytics) return;
+  try {
+    faLogEvent(analytics, name, params);
+  } catch (error) {
+    warn("analytics.logEvent", error);
+  }
+}
 
 export default app;

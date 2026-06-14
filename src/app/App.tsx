@@ -5,6 +5,7 @@ import { AppProvider, useApp, type AppNotification } from "./components/AppConte
 import { useAccent } from "./components/AccentContext";
 import { Onboarding } from "./components/Onboarding";
 import { setTranslationLanguage } from "../services/translate";
+import { setDataSharing as applyDataSharing, logUsage } from "../lib/firebase";
 import { BottomNav } from "./components/BottomNav";
 import { HomePage } from "./components/pages/HomePage";
 import { LookupPage } from "./components/pages/LookupPage";
@@ -137,6 +138,15 @@ function AppShell() {
 
   // Translate the whole UI into the selected language at runtime (cached).
   useEffect(() => { setTranslationLanguage(language); }, [language]);
+
+  // Apply the saved analytics consent once at startup (privacy-first: off unless
+  // the user opted in), then record anonymous page views when allowed.
+  useEffect(() => {
+    let consent = false;
+    try { consent = window.localStorage.getItem("matchmind:data-sharing") === "on"; } catch { /* ignore */ }
+    void applyDataSharing(consent);
+  }, []);
+  useEffect(() => { logUsage("page_view", { page: activePage }); }, [activePage]);
 
   const changePage = (id: string) => {
     if (id === "lookup" && activePage === "lookup") {

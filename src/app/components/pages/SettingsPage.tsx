@@ -5,6 +5,9 @@ import { useApp, type RoboTeam, type UserRole } from "../AppContext";
 import { TeamSearch } from "../TeamSearch";
 import { readFileAsDataUrl, downscaleImage } from "../media";
 import { LANGUAGES } from "../../../services/i18n";
+import { setDataSharing as applyDataSharing } from "../../../lib/firebase";
+
+const DATA_SHARING_KEY = "matchmind:data-sharing";
 
 const PRESET_AVATARS = ["🤖", "⚙️", "🦾", "🔧", "⚡", "🏆", "🚀", "🎯", "🛠️", "🔩", "🧠", "🦿"];
 
@@ -107,7 +110,19 @@ export function SettingsPage({ onSignIn, onNavigate }: { onSignIn?: () => void; 
   const { profile, team, teams, role, language, signedIn, isGuest, setTeams, setRole, setLanguage, updateProfile, signOut, setOnboarded } = useApp();
   const [notifications, setNotifications] = useState(true);
   const [matchAlerts, setMatchAlerts] = useState(true);
-  const [dataSharing, setDataSharing] = useState(false);
+  const [dataSharing, setDataSharing] = useState(() => {
+    try { return window.localStorage.getItem(DATA_SHARING_KEY) === "on"; } catch { return false; }
+  });
+
+  // Apply the saved consent to Firebase Analytics on mount, and whenever it
+  // changes. Collection stays OFF unless the user has opted in.
+  useEffect(() => { void applyDataSharing(dataSharing); }, [dataSharing]);
+
+  function changeDataSharing(next: boolean) {
+    setDataSharing(next);
+    try { window.localStorage.setItem(DATA_SHARING_KEY, next ? "on" : "off"); } catch { /* ignore */ }
+    void applyDataSharing(next);
+  }
   const [showTeam, setShowTeam] = useState(false);
   const [showAvatar, setShowAvatar] = useState(false);
   const [showLanguages, setShowLanguages] = useState(false);
@@ -308,8 +323,8 @@ export function SettingsPage({ onSignIn, onNavigate }: { onSignIn?: () => void; 
             icon={<Shield size={16} style={{ color: "#ff3b5c" }} />}
             iconBg="#ff3b5c15"
             label="Anonymous Data Sharing"
-            sub="Help improve MatchMind"
-            right={<Toggle value={dataSharing} onChange={setDataSharing} accent={accent} />}
+            sub="Share anonymous usage analytics to help improve MatchMind"
+            right={<Toggle value={dataSharing} onChange={changeDataSharing} accent={accent} />}
           />
         </Section>
 
